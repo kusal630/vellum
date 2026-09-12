@@ -26,6 +26,16 @@ class PalmRejectionEngine(
     private val restingTracker = RestingHandTracker(capabilities)
 
     /**
+     * Cold-start CANDIDATE tracked for a potential claim on the next MOVE. The
+     * size classifier buffers a lone cold-start contact as CANDIDATE on DOWN
+     * (never WRITING, so [manageWritingLock] cannot claim it there); it is
+     * promoted when stroke-like motion arrives. Kept here so the MOVE promotion
+     * has a backfill anchor (the tracker's downX/downY seeds the stroke tail
+     * in InkCanvasView) even if the tracker lags one frame.
+     */
+    private var pendingCandidateId: Int? = null
+
+    /**
      * The user-reserved palm rest zone resolved to screen pixels, or null when disabled.
      * Updated by the canvas every frame (it knows the zone and its own size).
      */
@@ -46,6 +56,7 @@ class PalmRejectionEngine(
         pointerStates.clear()
         classifier.resetHistory()
         restingTracker.reset()
+        pendingCandidateId = null
     }
 
     /** Recreates derived state only when the settings instance actually changes. */
@@ -148,13 +159,19 @@ class PalmRejectionEngine(
             lock.activePointerId,
             currentSettings,
         )
-        val classified = trackerResult.classified
+        var classified = trackerResult.classified
 
         // The lock may change AFTER manageWritingLock runs (a candidate promoted to the
         // writer on a MOVE frame, or a locked pointer cancelled by palm-growth). Re-read it
         // after applying the tracker's lock decisions so the frame reflects the real writer.
         manageWritingLock(frame, classified, nowNanos)
         applyTrackerLockChanges(frame, trackerResult, nowNanos)
+        // Cold-start safety net: if the tracker left a tracked DOWN CANDIDATE as
+        // CANDIDATE on this MOVE but it already moved like a stroke (>= 4mm with
+        // stroke velocity), promote it here so the first stroke is never dropped
+        // one full frame. The returned contact is upgraded to WRITING; its
+        // downX/downY backfills the buffered leading tail in InkCanvasView.
+        classified = applyPendingCandidatePromotion(frame, classified, nowNanos)
         val finalWritingPointerId = lock.activePointerId
         val gestureIds = selectGesturePointers(classified, finalWritingPointerId)
 
@@ -230,7 +247,66 @@ class PalmRejectionEngine(
         val promoteId = result.promoteCandidatePointerId
         if (promoteId != null && !lock.isActive && frame.action == InputAction.MOVE) {
             lock.tryClaim(promoteId, nowNanos, respectHoldoff = false)
+            if (lock.activePointerId == promoteId) pendingCandidateId = null
         }
+    }
+
+    /**
+     * Cold-start safety net for a DOWN-buffered CANDIDATE. When the tracker leaves
+     * the pending candidate as CANDIDATE on a MOVE that already moved like a stroke
+     * (>= 4mm with stroke velocity, unique mover implied by single-contact frame),
+     * claim the lock and upgrade the contact to WRITING so the first stroke is never
+     * dropped. The contact's downX/downY backfills the buffered leading tail.
+     */
+    private fun applyPendingCandidatePromotion(
+        frame: InputFrame,
+        classified: List<ClassifiedContact>,
+        nowNanos: Long,
+    ): List<ClassifiedContact> {
+        val pendingId = pendingCandidateId
+        if (pendingId == null || lock.isActive || frame.action != InputAction.MOVE) {
+            // Drop stale pending state: lifted, no longer present, or no longer a
+            // candidate (promoted/demoted by the tracker).
+            if (pendingId != null &&
+                (frame.contacts.none { it.pointerId == pendingId } ||
+                    classified.firstOrNull { it.contact.pointerId == pendingId }
+                        ?.classification != ContactClassification.CANDIDATE)
+            ) {
+                pendingCandidateId = null
+            }
+            return classified
+        }
+        val pending = classified.firstOrNull { it.contact.pointerId == pendingId }
+            ?: run { pendingCandidateId = null; return classified }
+        if (pending.classification != ContactClassification.CANDIDATE) {
+            pendingCandidateId = null
+            return classified
+        }
+        val distanceOk = pending.pathLengthMm >=
+            maxOf(COLD_START_PROMOTE_DISTANCE_MM, currentSettings.movementPromoteThresholdMm)
+        val velocityOk = pending.windowedVelocityMmPerSec >= currentSettings.minPromoteVelocityMmPerSec
+        if (!distanceOk || !velocityOk) return classified
+        lock.tryClaim(pendingId, nowNanos, respectHoldoff = false)
+        if (lock.activePointerId != pendingId) return classified
+        pendingCandidateId = null
+        return classified.map {
+            if (it.contact.pointerId == pendingId) {
+                it.copy(
+                    classification = ContactClassification.WRITING,
+                    reason = ClassificationReason.PROMOTED_TO_WRITING,
+                    confidence = 0.8f,
+                )
+            } else it
+        }
+    }
+
+    companion object {
+        /**
+         * Cold-start MOVE promotion distance (mm). Matches the regression test gate
+         * (>= 40px = 4mm at 10px/mm) and stays above the 3mm resting-hand jitter
+         * threshold so a settling palm tap never promotes.
+         */
+        const val COLD_START_PROMOTE_DISTANCE_MM = 4f
     }
 
     private fun manageWritingLock(
@@ -281,6 +357,16 @@ class PalmRejectionEngine(
                             nowNanos,
                             respectHoldoff = !currentSettings.enableFingerWriting,
                         )
+                        if (lock.activePointerId == frame.addedPointerId) pendingCandidateId = null
+                    } else {
+                        // Cold-start buffering: a lone contact lands as CANDIDATE (never
+                        // WRITING on DOWN). Track it so the next stroke-like MOVE can
+                        // promote it with its downX/downY backfilled.
+                        val buffered = classified.firstOrNull {
+                            it.contact.pointerId == frame.addedPointerId &&
+                                it.classification == ContactClassification.CANDIDATE
+                        }
+                        if (buffered != null) pendingCandidateId = frame.addedPointerId
                     }
                 }
             }
@@ -378,6 +464,7 @@ class PalmRejectionEngine(
                 if (lifted != null) {
                     lock.release(lifted, nowNanos)
                     pointerStates.remove(lifted)
+                    if (pendingCandidateId == lifted) pendingCandidateId = null
                     // The tracker keeps its own per-pointer motion state: drop the lifted
                     // pointer there too. Without this a reused pointer id on the next
                     // DOWN is treated as a continuing contact (stale isNew=false,
@@ -390,6 +477,7 @@ class PalmRejectionEngine(
             InputAction.CANCEL -> {
                 lock.reset(nowNanos)
                 pointerStates.clear()
+                pendingCandidateId = null
                 // A cancel aborts the whole gesture: no contact survives, so the
                 // tracker's motion states and noise estimate must not leak into the
                 // next gesture (stale RESTING/CANDIDATE would swallow the next stroke).

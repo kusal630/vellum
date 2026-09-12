@@ -1,0 +1,11 @@
+v1.3.0 — stability and release hardening
+
+- Canvas stability fixes plus input-signal plumbing (incl. canceled-event
+  handling) for more reliable palm rejection
+- Input pipeline flags: palm-rejection on/off, sensitivity presets, handedness
+  posture, and Labs calibration plumbing
+- Performance: zero-allocation draw path, viewport culling, and surgical
+  invalidation while writing
+- Accessibility: toolbar contrast and dark-mode fixes, larger touch targets
+- Sync UI: Syncthing background worker with conflict-resolution screen
+- Release build: ProGuard/R8 minification, shrunk resources, signed APK

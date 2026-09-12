@@ -5,7 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import com.vellum.notes.editor.StrokeBuilder
@@ -52,6 +54,11 @@ class InkCanvasView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
 
+    companion object {
+        /** MUSE-P0-1 spec: rejected-touch ring fade duration. */
+        const val REJECTED_RING_DURATION_MS = 300L
+    }
+
     interface Listener {
         fun onStrokeCommitted(stroke: Stroke)
         fun onShapeCommitted(shape: ShapeObject)
@@ -90,7 +97,12 @@ class InkCanvasView @JvmOverloads constructor(
                 val pureAppend = value.size == field.size + 1 && value.dropLast(1) == field
                 field = value
                 strokesVersion++
-                if (pureAppend) appendStrokeGeometry(value.last()) else rebuildStrokeGeometry()
+                if (pureAppend) appendStrokeGeometry(value.last()) else {
+                    // Full content replacement (page/content switch, restore): stale
+                    // palm-rejection + in-progress gesture state must not bleed over.
+                    resetInputStateForContentSwitch()
+                    rebuildStrokeGeometry()
+                }
                 if (value.isNotEmpty()) {
                     strokeIdCounter = maxOf(strokeIdCounter, value.maxOf { it.id })
                 }
@@ -104,10 +116,41 @@ class InkCanvasView @JvmOverloads constructor(
                 val pureAppend = value.size == field.size + 1 && value.dropLast(1) == field
                 field = value
                 shapesVersion++
-                if (pureAppend) appendShapeGeometry(value.last()) else rebuildShapeGeometry()
+                if (pureAppend) appendShapeGeometry(value.last()) else {
+                    // Full content replacement (page/content switch, restore): stale
+                    // palm-rejection + in-progress gesture state must not bleed over.
+                    resetInputStateForContentSwitch()
+                    rebuildShapeGeometry()
+                }
                 invalidate()
             }
         }
+
+    /**
+     * Page/content switch entry point: drops any in-progress stroke/shape/erase
+     * gesture and resets the shared [PalmRejectionEngine] so per-pointer motion,
+     * classifier history and the writing lock from the old page never bleed into
+     * the new one. Pure appends within a page never call this, so rejection
+     * behavior mid-page is unchanged.
+     */
+    private fun resetInputStateForContentSwitch() {
+        strokeBuilder?.onCancel()
+        strokeBuilder = null
+        writingPointerId = -1
+        gesture = null
+        gestureEraseOverride = false
+        eraseGesturePoints = null
+        eraserPointerId = -1
+        lastEraserPoint = null
+        shapeStartWorld = null
+        shapeCurrentWorld = null
+        shapePreviewPath = null
+        shapePreviewPaint = null
+        selectionMode = SelectionMode.NONE
+        writeEraseDetector.reset(false)
+        twoFingerTapDetector.reset()
+        if (::engine.isInitialized) engine.reset()
+    }
 
     var background: PageBackground = PageBackground()
 
@@ -261,9 +304,41 @@ class InkCanvasView @JvmOverloads constructor(
     /** Called when the user drags the palm-zone grip so the position can be persisted. */
     var onPalmZoneChanged: ((PalmZone) -> Unit)? = null
 
+    /**
+     * Writing-status signal for the P0-1 writing-status chip (EditorScreen/WritingStatusChip).
+     * Emitted from the existing engine signals every classified frame (deduplicated):
+     * - TWO_FINGER_PAN when the engine permits a 2-contact gesture,
+     * - PALM_REJECTED when any contact is PALM/REJECTED/RESTING,
+     * - PEN_READY otherwise.
+     */
+    var onWritingStatusChanged: ((WritingStatus) -> Unit)? = null
+    private var lastWritingStatus: WritingStatus = WritingStatus.PEN_READY
+
+    /**
+     * Fired on a fresh rejected contact (DOWN frame) with its screen-px position so the
+     * UI can haptic-burst + draw the rejected-touch fading ring.
+     */
+    var onRejectedTouch: ((xPx: Float, yPx: Float) -> Unit)? = null
+
     private var zoneDragging = false
     private var zoneDragPointerId = -1
     private var lastZoneRect: PalmZoneRect? = null
+
+    // --- P0-1 rejected-touch fading rings (screen px + start time; 300ms fade) ---
+    private data class RejectedRing(val x: Float, val y: Float, val startMs: Long)
+    private val rejectedRings = ArrayList<RejectedRing>()
+    private val rejectedRingPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        color = 0xFFC62828.toInt()
+        isAntiAlias = true
+    }
+    /** Screen-px ring shown where a palm was rejected; auto-fades over 300ms. */
+    fun showRejectedRing(xPx: Float, yPx: Float) {
+        rejectedRings += RejectedRing(xPx, yPx, SystemClock.uptimeMillis())
+        if (rejectedRings.size > 8) rejectedRings.removeAt(0)
+        invalidate()
+    }
 
     // --- scroll bar (visible page scroller on the right edge) ---
     var scrollBarVisible: Boolean = true
@@ -368,6 +443,13 @@ class InkCanvasView @JvmOverloads constructor(
         textSize = 14f
         color = 0xFF000000.toInt()
     }
+    /**
+     * SENT-07: pre-sized scratch buffers for the debug overlay so onDraw never
+     * allocates per-frame formatters. Reused via setLength(0) on every contact;
+     * debug-gated behavior (same text content) is unchanged.
+     */
+    private val debugLabelBuilder = StringBuilder(48)
+    private val debugDetailBuilder = StringBuilder(96)
 
     // --- palm zone paints (fields: onDraw used to allocate these every frame) ---
     // Contrast audit on light paper: zone blue #2E5BFF is 5.2:1 on white;
@@ -533,6 +615,9 @@ class InkCanvasView @JvmOverloads constructor(
         val classified = engine.process(input)
         lastClassified = classified
 
+        // P0-1 writing-status chip signal derived from existing engine outputs.
+        emitWritingStatus(classified, input)
+
         // A new gesture always starts clean: clear any erase-override from a previous
         // gesture and reset the write/erase detector. Also claim the touch stream so
         // no ancestor (edge-to-edge insets, dialogs) can steal it mid-stroke — a
@@ -582,6 +667,41 @@ class InkCanvasView @JvmOverloads constructor(
      * whenever the view is laid out, the zone settings change, or a frame is processed —
      * otherwise the reserved palm space is neither drawn nor active until a touch lands.
      */
+    private fun emitWritingStatus(
+        classified: com.vellum.notes.input.ClassifiedFrame,
+        input: com.vellum.notes.input.InputFrame,
+    ) {
+        val status = when {
+            classified.gesturePointerIds.size >= 2 -> WritingStatus.TWO_FINGER_PAN
+            classified.contacts.any {
+                it.classification == com.vellum.notes.input.ContactClassification.PALM ||
+                    it.classification == com.vellum.notes.input.ContactClassification.REJECTED ||
+                    it.classification == com.vellum.notes.input.ContactClassification.RESTING
+            } -> WritingStatus.PALM_REJECTED
+            else -> WritingStatus.PEN_READY
+        }
+        // Haptic on reject burst: only on the DOWN edge, never per-MOVE (battery/noise).
+        if (status == WritingStatus.PALM_REJECTED &&
+            (input.action == com.vellum.notes.input.InputAction.DOWN ||
+                input.action == com.vellum.notes.input.InputAction.POINTER_DOWN)
+        ) {
+            val rejected = classified.contacts.firstOrNull {
+                it.classification == com.vellum.notes.input.ContactClassification.PALM ||
+                    it.classification == com.vellum.notes.input.ContactClassification.REJECTED ||
+                    it.classification == com.vellum.notes.input.ContactClassification.RESTING
+            }
+            if (rejected != null) {
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                showRejectedRing(rejected.contact.x, rejected.contact.y)
+                onRejectedTouch?.invoke(rejected.contact.x, rejected.contact.y)
+            }
+        }
+        if (status != lastWritingStatus) {
+            lastWritingStatus = status
+            onWritingStatusChanged?.invoke(status)
+        }
+    }
+
     private fun syncPalmZoneRect() {
         if (!::capabilities.isInitialized || !::engine.isInitialized) return
         lastZoneRect = computePalmZoneRect()
@@ -591,8 +711,28 @@ class InkCanvasView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        // Set viewport size directly so the resting-hand tracker's edge/cluster
+        // rules are live from the first layout pass — without this the viewport
+        // is 0 on common paths and the `displayMaxPx` fallback is the only guard.
+        if (::engine.isInitialized) {
+            engine.setViewportSize(w, h)
+        }
         syncPalmZoneRect()
         invalidate()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        listener = null
+        pdfBackground?.let { bmp ->
+            if (!bmp.isRecycled) bmp.recycle()
+        }
+        pdfBackground = null
+        for ((_, bmp) in imageBitmaps) {
+            if (!bmp.isRecycled) bmp.recycle()
+        }
+        imageBitmaps = emptyMap()
+        if (::engine.isInitialized) engine.reset()
     }
 
     /**
@@ -797,6 +937,17 @@ class InkCanvasView @JvmOverloads constructor(
                     strokeBuilder = null
                     writingPointerId = -1
                     builder?.let { b ->
+                        // Feed UP-batch coalesced history into the active stroke before
+                        // finalizing so fast-stroke tails are not cut — the OS may batch
+                        // the last few MOVE samples into the UP event and without them
+                        // the stroke ends abruptly at the last MOVE position.
+                        for (h in input.history) {
+                            if (h.pointerId == writingPointerId) {
+                                val hx = screenToWorldX(h.x)
+                                val hy = screenToWorldY(h.y)
+                                b.onMove(hx, hy, h.eventTimeNanos)
+                            }
+                        }
                         val contact = classified.contactFor(input.liftedPointerId)
                         val endX: Float
                         val endY: Float
@@ -1821,6 +1972,23 @@ class InkCanvasView @JvmOverloads constructor(
         if (debugOverlayEnabled) {
             drawDebugOverlay(canvas)
         }
+
+        // P0-1 rejected-touch fading rings: expanding circle fading over 300ms.
+        if (rejectedRings.isNotEmpty()) {
+            val now = SystemClock.uptimeMillis()
+            val it = rejectedRings.iterator()
+            var needsAnotherFrame = false
+            while (it.hasNext()) {
+                val ring = it.next()
+                val age = now - ring.startMs
+                if (age > REJECTED_RING_DURATION_MS) { it.remove(); continue }
+                val t = age / REJECTED_RING_DURATION_MS.toFloat()
+                rejectedRingPaint.alpha = ((1f - t) * 255).toInt()
+                canvas.drawCircle(ring.x, ring.y, 24f + t * 48f, rejectedRingPaint)
+                needsAnotherFrame = true
+            }
+            if (needsAnotherFrame) postInvalidateOnAnimation()
+        }
     }
 
     /**
@@ -1848,26 +2016,35 @@ class InkCanvasView @JvmOverloads constructor(
             }
             val r = (c.toolMajorMm * capabilities.pxPerMm / 2f).coerceAtLeast(24f)
             debugFillPaint.color = color
-            debugFillPaint.alpha = 70
-            canvas.drawCircle(c.x, c.y, r, debugFillPaint)
             debugFillPaint.alpha = 255
+            // SENT-07: single circle draw per contact (the translucent + opaque
+            // double-draw was redundant — the opaque pass fully covered the first).
             canvas.drawCircle(c.x, c.y, r, debugFillPaint)
             // Labels stay black on the light paper (21:1) — classification hues
             // alone would drop below 4.5:1 for gray/amber states.
             debugLabelPaint.color = 0xFF000000.toInt()
+            // SENT-07: no per-frame String.format / string-template allocation in
+            // the hot path — build both lines into reused pre-sized buffers.
+            debugLabelBuilder.setLength(0)
+            debugLabelBuilder.append('P').append(c.pointerId).append(' ')
+                .append(cc.classification.name).append(' ')
+                .append(Math.round(cc.confidence * 100)).append('%')
             canvas.drawText(
-                "P${c.pointerId} ${cc.classification.name} ${(cc.confidence * 100).toInt()}%",
+                debugLabelBuilder.toString(),
                 c.x + r + 4f,
                 c.y + 4f,
                 debugLabelPaint,
             )
             // Second line: windowed velocity, path length, write/rest scores, and the reason
             // so velocity-gated resting behavior can be diagnosed on-device.
+            debugDetailBuilder.setLength(0)
+            debugDetailBuilder.append("v=").append(Math.round(cc.windowedVelocityMmPerSec))
+                .append("mm/s L=").append(Math.round(cc.pathLengthMm))
+                .append("mm W=").append(Math.round(cc.writeScore))
+                .append(" R=").append(Math.round(cc.restScore))
+                .append(' ').append(cc.reason.name)
             canvas.drawText(
-                "v=${"%.0f".format(cc.windowedVelocityMmPerSec)}mm/s " +
-                    "L=${"%.0f".format(cc.pathLengthMm)}mm " +
-                    "W=${"%.0f".format(cc.writeScore)} R=${"%.0f".format(cc.restScore)} " +
-                    cc.reason.name,
+                debugDetailBuilder.toString(),
                 c.x + r + 4f,
                 c.y + 20f,
                 debugLabelPaint,
@@ -1879,4 +2056,14 @@ class InkCanvasView @JvmOverloads constructor(
             canvas.drawRect(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, clusterBoundsPaint)
         }
     }
+}
+
+/**
+ * Writing-status for the P0-1 writing-status chip. Derived from existing engine signals
+ * (activeWritingPointerId / gesturePointerIds / contact classifications) — no new pipeline.
+ */
+enum class WritingStatus {
+    PEN_READY,
+    PALM_REJECTED,
+    TWO_FINGER_PAN,
 }

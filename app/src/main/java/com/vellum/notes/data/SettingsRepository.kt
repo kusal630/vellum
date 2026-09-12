@@ -58,6 +58,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val PALM_ZONE_CY_KEY = floatPreferencesKey("palm_zone_cy")
         private val PALM_ZONE_W_KEY = floatPreferencesKey("palm_zone_w")
         private val PALM_ZONE_H_KEY = floatPreferencesKey("palm_zone_h")
+        private val PALM_ZONE_COACHMARK_KEY = booleanPreferencesKey("show_palm_zone_coachmark")
         private val PALM_REJECTION_ENABLED_KEY = booleanPreferencesKey("palm_rejection_enabled")
         private val RESTING_HAND_ENABLED_KEY = booleanPreferencesKey("resting_hand_enabled")
         private val PALM_SIZE_THRESHOLD_KEY = floatPreferencesKey("palm_size_threshold_mm")
@@ -109,6 +110,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             prefs[PALM_ZONE_CY_KEY] = current.palmZone.centerYFrac
             prefs[PALM_ZONE_W_KEY] = current.palmZone.widthMm
             prefs[PALM_ZONE_H_KEY] = current.palmZone.heightMm
+            prefs[PALM_ZONE_COACHMARK_KEY] = current.showPalmZoneCoachmark
             prefs[PALM_REJECTION_ENABLED_KEY] = current.palmRejectionEnabled
             prefs[RESTING_HAND_ENABLED_KEY] = current.restingHandModeEnabled
             prefs[PALM_SIZE_THRESHOLD_KEY] = current.palmSizeThresholdMm
@@ -170,6 +172,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                 widthMm = prefs[PALM_ZONE_W_KEY] ?: 72f,
                 heightMm = prefs[PALM_ZONE_H_KEY] ?: 60f,
             ),
+            showPalmZoneCoachmark = prefs[PALM_ZONE_COACHMARK_KEY] ?: true,
             palmRejectionEnabled = prefs[PALM_REJECTION_ENABLED_KEY] ?: true,
             restingHandModeEnabled = prefs[RESTING_HAND_ENABLED_KEY] ?: true,
             palmSizeThresholdMm = prefs[PALM_SIZE_THRESHOLD_KEY] ?: 24f,

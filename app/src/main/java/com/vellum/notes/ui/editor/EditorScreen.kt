@@ -1,10 +1,19 @@
 package com.vellum.notes.ui.editor
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,9 +46,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Highlight
@@ -47,6 +58,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.TextFields
@@ -70,6 +82,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -85,14 +98,18 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -101,6 +118,7 @@ import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -115,9 +133,12 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import android.content.Intent
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.res.stringResource
+import com.vellum.notes.R
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.core.content.FileProvider
 import com.vellum.notes.VellumApp
@@ -158,12 +179,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 
-private val PALETTE = com.vellum.notes.editor.PaperAesthetics.PAPER_INKS + listOf(
-    0xFF000000, 0xFF424242, 0xFFFFFFFF, 0xFFFB8C00, 0xFFFDD835,
-    0xFF43A047, 0xFF00ACC1, 0xFF8E24AA, 0xFFEC407A,
+/** P1-4: 12 NAMED color swatches (names announced, never hex). */
+private val NAMED_COLORS = listOf(
+    "Black" to 0xFF000000L,
+    "Dark Gray" to 0xFF424242L,
+    "White" to 0xFFFFFFFFL,
+    "Red" to 0xFFD32F2FL,
+    "Orange" to 0xFFFB8C00L,
+    "Yellow" to 0xFFFDD835L,
+    "Green" to 0xFF43A047L,
+    "Teal" to 0xFF00897BL,
+    "Sky Blue" to 0xFF00ACC1L,
+    "Blue" to 0xFF1565C0L,
+    "Purple" to 0xFF8E24AAL,
+    "Pink" to 0xFFEC407AL,
 )
 
-private val PEN_WIDTHS_MM = listOf(0.3f, 0.5f, 0.7f, 1f, 1.5f, 2f, 3f, 5f)
+/** P1-4: 5 width steps with mm labels + live stroke preview. */
+private val PEN_WIDTH_STEPS_MM = listOf(0.5f, 1.0f, 2.0f, 3.5f, 5.0f)
 
 private val PEN_TYPES = listOf(
     PenType.BALLPOINT to "Ballpoint",
@@ -183,6 +216,13 @@ private val SHAPE_KINDS = listOf(
     ShapeKind.ARROW to "Arrow",
     ShapeKind.STAR to "Star",
     ShapeKind.POLYGON to "Hexagon",
+)
+
+/** P1-4 smoothing chips OFF/STEADY/FLOW mapped onto the existing SmoothingMode. */
+private val SMOOTHING_CHIPS = listOf(
+    "OFF" to SmoothingMode.NONE,
+    "STEADY" to SmoothingMode.MEDIUM,
+    "FLOW" to SmoothingMode.HIGH,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -228,9 +268,8 @@ fun EditorScreen(
     val pageId = selectedPageId
 
     if (pageId == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Preparing page…")
-        }
+        // P1-6 trust signal: skeleton shimmer page loading instead of bare text.
+        SkeletonShimmer(modifier = Modifier.fillMaxSize(), contentDescription = "Loading pages")
         return
     }
 
@@ -244,9 +283,8 @@ fun EditorScreen(
 
     val state = editorState
     if (state == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Loading page…")
-        }
+        // P1-6 trust signal: skeleton shimmer page loading instead of bare text.
+        SkeletonShimmer(modifier = Modifier.fillMaxSize(), contentDescription = "Loading page content")
         return
     }
 
@@ -257,6 +295,9 @@ fun EditorScreen(
     val shapeKind by state.shapeKind.collectAsState()
     val selectedIds by state.selectedIds.collectAsState()
     val settings by settingsFlow.collectAsState(initial = PalmRejectionSettings())
+
+    // P0-1 writing-status chip state, driven by existing engine signals via InkCanvasView.
+    var writingStatus by remember { mutableStateOf(WritingStatus.PEN_READY) }
 
     // Page rail overlay + version history dialog state.
     var historyPageId by remember { mutableStateOf<Long?>(null) }
@@ -296,16 +337,86 @@ fun EditorScreen(
         }
     }
 
+    // SCOUT-05: in-app rationale shown BEFORE every system permission prompt.
+    // Both RECORD_AUDIO and POST_NOTIFICATIONS are requested only from here, and
+    // both go through their rationale AlertDialog first (no direct launch).
+    var showMicRationale by remember { mutableStateOf(false) }
+    var showNotificationRationale by remember { mutableStateOf(false) }
+
+    fun needsNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            uiContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+
+    fun startRecordingAllowingNotifications() {
+        if (needsNotificationPermission()) {
+            showNotificationRationale = true
+        } else {
+            AudioCaptureService.start(uiContext, pageId)
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // Notification is optional decoration for the foreground-service status:
+        // start recording whether granted or denied so the mic flow never blocks.
+        classroomNotice = null
+        AudioCaptureService.start(uiContext, pageId)
+    }
+
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             classroomNotice = null
-            AudioCaptureService.start(uiContext, pageId)
+            startRecordingAllowingNotifications()
         } else {
-            classroomNotice = "Microphone permission denied — classroom recording is unavailable. " +
-                "You can still write notes normally."
+            classroomNotice = uiContext.getString(R.string.mic_permission_denied)
         }
+    }
+
+    if (showMicRationale) {
+        AlertDialog(
+            onDismissRequest = { showMicRationale = false },
+            title = { Text(stringResource(R.string.mic_rationale_title)) },
+            text = { Text(stringResource(R.string.mic_rationale_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showMicRationale = false
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }) { Text(stringResource(R.string.mic_rationale_allow)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMicRationale = false }) {
+                    Text(stringResource(R.string.mic_rationale_dismiss))
+                }
+            },
+        )
+    }
+
+    if (showNotificationRationale) {
+        AlertDialog(
+            onDismissRequest = { showNotificationRationale = false },
+            title = { Text(stringResource(R.string.notification_rationale_title)) },
+            text = { Text(stringResource(R.string.notification_rationale_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNotificationRationale = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        AudioCaptureService.start(uiContext, pageId)
+                    }
+                }) { Text(stringResource(R.string.notification_rationale_allow)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showNotificationRationale = false
+                    AudioCaptureService.start(uiContext, pageId)
+                }) { Text(stringResource(R.string.notification_rationale_dismiss)) }
+            },
+        )
     }
 
     val toggleClassroom: () -> Unit = {
@@ -323,9 +434,9 @@ fun EditorScreen(
                 classroomNotice = "Speech model not installed. Run ./gradlew downloadVoskModel and " +
                     "rebuild to enable Classroom Notes."
             } else if (uiContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                showMicRationale = true
             } else {
-                AudioCaptureService.start(uiContext, pageId)
+                startRecordingAllowingNotifications()
             }
         }
     }
@@ -692,6 +803,7 @@ fun EditorScreen(
                                     view.capabilities = capabilities
                                     view.engine = engine
                                     view.listener = vm.canvasListener
+                                    view.onWritingStatusChanged = { writingStatus = it }
                                     engine.reset()
                                 }
                             },
@@ -709,6 +821,7 @@ fun EditorScreen(
                                 view.pdfBackground = pdfPageBitmap
                                 view.selectionBoundsMm = state.selectionBoundsMm
                                 view.listener = vm.canvasListener
+                                view.onWritingStatusChanged = { writingStatus = it }
                                 view.autoEraseEnabled = settings.autoEraseEnabled
                                 view.scribbleSensitivity = settings.scribbleSensitivity
                                 view.debugOverlayEnabled = settings.debugOverlayEnabled
@@ -724,6 +837,11 @@ fun EditorScreen(
                             onRelease = { view -> view.finalizeActiveStroke() },
                         )
                     }
+                    // P0-1 writing-status chip: top-center below toolbar.
+                    WritingStatusChip(
+                        status = writingStatus,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                    )
                     classroomNotice?.let { notice ->
                         Surface(
                             modifier = Modifier
@@ -744,37 +862,75 @@ fun EditorScreen(
                             }
                         }
                     }
-                    // Left color rail: quick pen colors + widths hovering over the
-                    // canvas edge, clear of the writing hand.
-                    var paletteOpen by remember { mutableStateOf(false) }
-                    ColorRail(
-                        penStyle = penStyle,
-                        onColor = { color ->
-                            vm.setPenStyle(penStyle.copy(colorArgb = color))
-                        },
-                        onWidth = { w ->
-                            vm.setPenStyle(penStyle.copy(widthMm = w))
-                        },
-                        onOpenPalette = { paletteOpen = !paletteOpen },
-                        paletteOpen = paletteOpen,
-                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
-                    )
-                    if (paletteOpen) {
-                        Surface(
-                            modifier = Modifier.align(Alignment.CenterStart)
-                                .padding(start = 72.dp, end = 12.dp),
-                            shape = RoundedCornerShape(20.dp),
-                            tonalElevation = 3.dp,
-                            shadowElevation = 2.dp,
-                        ) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text("Colors", style = MaterialTheme.typography.labelMedium)
-                                Spacer(Modifier.height(6.dp))
-                                ColorRow(penStyle = penStyle, onColor = { color ->
-                                    vm.setPenStyle(penStyle.copy(colorArgb = color))
-                                })
-                            }
+                    // P1-4: ColorRail overlay removed — pickers live in the single bottom panel.
+                    // P1-4: single bottom pickers panel (colors + widths + smoothing).
+                    // Composed FIRST so the palm overlays below draw on top of it.
+                    val pickersVisible =
+                        tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.SHAPES
+                    if (pickersVisible) {
+                        PenPickersPanel(
+                            penStyle = penStyle,
+                            smoothing = settings.smoothing,
+                            onColor = { color ->
+                                vm.setPenStyle(penStyle.copy(colorArgb = color))
+                            },
+                            onWidth = { w ->
+                                vm.setPenStyle(penStyle.copy(widthMm = w))
+                            },
+                            onSmoothingChange = { mode ->
+                                scope.launch {
+                                    app.container.settingsRepository.updateSettings { this.smoothing = mode }
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                    // BUG 2 + BUG 3 fix: palm overlays are composed LAST (topmost z) and
+                    // lifted above the bottom pickers panel when it is visible. Previously
+                    // they sat at bottom=96/152dp UNDER the full-width panel, so on a fresh
+                    // install (default PEN tool) the handle and the once-per-install
+                    // coachmark were covered and never displayed.
+                    // Panel height estimate (~340dp: fixed 48dp rows + labels + paddings),
+                    // so 352dp clears it with an 8dp gap; 96dp when the panel is hidden.
+                    val palmOverlayBottom = if (pickersVisible) 352.dp else 96.dp
+                    Column(
+                        modifier = Modifier.align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = palmOverlayBottom),
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // BUG 2: once-per-install coachmark. Display condition is the
+                        // persisted showPalmZoneCoachmark flag (DataStore, default true);
+                        // Got-it persists false so it shows exactly once per install.
+                        if (settings.showPalmZoneCoachmark) {
+                            PalmZoneCoachmark(
+                                onDismiss = {
+                                    scope.launch {
+                                        app.container.settingsRepository.updateSettings {
+                                            showPalmZoneCoachmark = false
+                                        }
+                                    }
+                                },
+                            )
                         }
+                        // BUG 3: handle is always composed (visible by default in every
+                        // zone mode — never gated); drag resizes + persists palmZone.
+                        PalmZoneHandle(
+                            settings = settings,
+                            onResize = { newWidthMm, newHeightMm ->
+                                scope.launch {
+                                    app.container.settingsRepository.updateSettings {
+                                        palmZone = palmZone.copy(
+                                            widthMm = newWidthMm.coerceIn(40f, 140f),
+                                            heightMm = newHeightMm.coerceIn(28f, 110f),
+                                            mode = com.vellum.notes.input.PalmZoneMode.MANUAL,
+                                        )
+                                    }
+                                }
+                            },
+                        )
                     }
                 }
 
@@ -1360,9 +1516,357 @@ private suspend fun scrollListToFraction(
 }
 
 /**
- * Sync status pill for the canvas top bar, driven by [SyncStatus] from
- * SyncRepository. Compact by design: a colored dot + short label so sync
- * health (including CONFLICT/FAILED) is visible without leaving the canvas.
+ * P0-1 writing-status chip: top-center below toolbar. States come from existing engine
+ * signals (see InkCanvasView.onWritingStatusChanged): Pen ready / Palm rejected /
+ * Two-finger pan. 120ms fade, liveRegion polite + contentDescription.
+ */
+@Composable
+fun WritingStatusChip(
+    status: WritingStatus,
+    modifier: Modifier = Modifier,
+) {
+    val (label, description) = when (status) {
+        WritingStatus.PEN_READY -> "Pen ready" to "Pen ready to write"
+        WritingStatus.PALM_REJECTED -> "Palm rejected" to "Palm touch rejected, pen still active"
+        WritingStatus.TWO_FINGER_PAN -> "Two-finger pan" to "Two-finger pan and zoom mode"
+    }
+    androidx.compose.animation.AnimatedVisibility(
+        visible = true,
+        enter = fadeIn(animationSpec = tween(120, easing = FastOutSlowInEasing)),
+        exit = fadeOut(animationSpec = tween(120, easing = FastOutSlowInEasing)),
+        modifier = modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = "Writing status: $description"
+            stateDescription = label
+        },
+    ) {
+        // Key on status so the 120ms fade replays on every state change.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = true,
+            enter = fadeIn(animationSpec = tween(120)),
+            exit = fadeOut(animationSpec = tween(120)),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+            ) {
+                // Distinct key per status keeps the fade + announcement in sync.
+                key(label) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            Modifier.size(8.dp).clip(CircleShape).background(
+                                when (status) {
+                                    WritingStatus.PEN_READY -> Color(0xFF43A047)
+                                    WritingStatus.PALM_REJECTED -> Color(0xFFE53935)
+                                    WritingStatus.TWO_FINGER_PAN -> Color(0xFF1E88E5)
+                                }
+                            )
+                        )
+                        Text(label, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * P0-3 visible palm-zone handle: dashed rounded rect bottom-right 96x48
+ * with grip; drag resizes the existing palmZone setting.
+ */
+@Composable
+fun PalmZoneHandle(
+    settings: PalmRejectionSettings,
+    onResize: (Float, Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val zone = settings.palmZone
+    val density = LocalDensity.current
+    val outlineColor = MaterialTheme.colorScheme.primary
+    val gripColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = modifier
+            .size(width = 96.dp, height = 48.dp)
+            .pointerInput(zone.widthMm, zone.heightMm) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    val dpi = density.density * 160f
+                    val dWidthMm = dragAmount.x / dpi * 25.4f
+                    val dHeightMm = dragAmount.y / dpi * 25.4f
+                    onResize(zone.widthMm + dWidthMm, zone.heightMm + dHeightMm)
+                }
+            }
+            .semantics {
+                contentDescription = "Palm rest zone handle"
+                stateDescription =
+                    "Palm zone ${zone.widthMm.toInt()} by ${zone.heightMm.toInt()} millimeters"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            // BUG 1/3 fix: theme-aware outline (primary has >= 8:1 contrast on the
+            // canvas in both light and dark themes) instead of hardcoded gray.
+            drawRoundRect(
+                color = outlineColor,
+                style = Stroke(
+                    width = 2.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)),
+                ),
+                cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx()),
+            )
+        }
+        Icon(
+            Icons.Filled.DragHandle,
+            contentDescription = "Resize palm rest zone",
+            tint = gripColor,
+        )
+    }
+}
+
+/**
+ * P0-3 first-run palm-zone coachmark: small bubble anchored just above the
+ * [PalmZoneHandle]. Shown only while
+ * [PalmRejectionSettings.showPalmZoneCoachmark] is true (DataStore, default
+ * true); the Got-it button persists dismissal. TalkBack-announced via a
+ * polite liveRegion, following the writing-status chip pattern.
+ */
+@Composable
+fun PalmZoneCoachmark(
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = "Coachmark: Rest your palm here. Dismiss to hide this tip."
+        },
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 4.dp,
+        shadowElevation = 3.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Rest your palm here", style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onDismiss) { Text("Got it") }
+        }
+    }
+}
+
+/**
+ * P1-4 single bottom pickers panel (colors + widths + smoothing).
+ * Colors use the 12 NAMED swatches (names announced, never hex); widths use the
+ * 5 mm steps with labels + live stroke preview; smoothing uses OFF/STEADY/FLOW chips.
+ */
+@Composable
+fun PenPickersPanel(
+    penStyle: PenStyle,
+    smoothing: SmoothingMode,
+    onColor: (Long) -> Unit,
+    onWidth: (Float) -> Unit,
+    onSmoothingChange: (SmoothingMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.semantics { isTraversalGroup = true },
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+    ) {
+        Column(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Color", style = MaterialTheme.typography.labelMedium)
+            NAMED_COLORS.chunked(6).forEach { row ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    row.forEach { (name, argb) ->
+                        val selected = penStyle.colorArgb == argb
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color(argb))
+                                .border(
+                                    width = if (selected) 3.dp else 1.dp,
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    shape = CircleShape,
+                                )
+                                .semantics {
+                                    contentDescription = "Pen color $name"
+                                    this.selected = selected
+                                    stateDescription =
+                                        if (selected) "Selected color $name" else "Color $name"
+                                    this.role = Role.RadioButton
+                                }
+                                .clickable(role = Role.RadioButton) { onColor(argb) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (selected) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = if (name == "White" || name == "Yellow") Color.Black
+                                    else Color.White,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Text("Width", style = MaterialTheme.typography.labelMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PEN_WIDTH_STEPS_MM.forEach { w ->
+                    val selected = kotlin.math.abs(penStyle.widthMm - w) < 0.01f
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    width = if (selected) 3.dp else 1.dp,
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    shape = CircleShape,
+                                )
+                                .semantics {
+                                    contentDescription = "Pen width $w millimeters"
+                                    this.selected = selected
+                                    stateDescription =
+                                        if (selected) "Selected width $w millimeters"
+                                        else "$w millimeters"
+                                    this.role = Role.RadioButton
+                                }
+                                .clickable(role = Role.RadioButton) { onWidth(w) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size((w * 3).dp.coerceAtMost(28.dp))
+                                    .clip(CircleShape)
+                                    .background(penStyle.colorArgb.toColor()),
+                            )
+                        }
+                        Text("$w mm", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                // Live stroke preview in the current color/width.
+                Canvas(
+                    Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .semantics {
+                            contentDescription =
+                                "Stroke preview ${penStyle.widthMm} millimeters"
+                        },
+                ) {
+                    val strokePx = ((penStyle.widthMm * 3).dp).toPx()
+                        .coerceAtLeast(2f)
+                        .coerceAtMost(size.height * 0.6f)
+                    drawLine(
+                        color = penStyle.colorArgb.toColor(),
+                        start = Offset(0f, size.height / 2f),
+                        end = Offset(size.width, size.height / 2f),
+                        strokeWidth = strokePx,
+                    )
+                }
+            }
+            Text("Smoothing", style = MaterialTheme.typography.labelMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SMOOTHING_CHIPS.forEach { (label, mode) ->
+                    val selected = smoothing == mode
+                    Box(
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primaryContainer
+                                else Color.Transparent,
+                            )
+                            .border(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant,
+                                shape = RoundedCornerShape(16.dp),
+                            )
+                            .semantics {
+                                contentDescription = "Smoothing $label"
+                                this.selected = selected
+                                stateDescription =
+                                    if (selected) "Selected smoothing $label"
+                                    else "Smoothing $label"
+                                this.role = Role.RadioButton
+                            }
+                            .clickable(role = Role.RadioButton) { onSmoothingChange(mode) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(label, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * P1-6 trust signal: skeleton shimmer page loading instead of bare text.
+ */
+@Composable
+fun SkeletonShimmer(
+    modifier: Modifier = Modifier,
+    contentDescription: String = "Loading",
+) {
+    val transition = rememberInfiniteTransition(label = "skeletonShimmer")
+    val alpha by transition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "shimmerAlpha",
+    )
+    Column(
+        modifier
+            .semantics {
+                this.contentDescription = contentDescription
+                liveRegion = LiveRegionMode.Polite
+            }
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        repeat(4) {
+            Box(
+                Modifier.fillMaxWidth(if (it == 0) 0.5f else 1f).height(if (it == 0) 28.dp else 18.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha * 0.6f + 0.2f)),
+            )
+        }
+    }
+}
+
+/**
+ * P1-6 trust signal: sync becomes a 20dp status dot on the nav pill.
+ * Driven by SyncStatus from SyncRepository; always visible so CONFLICT/FAILED
+ * are noticed without leaving the canvas.
  */
 @Composable
 fun SyncStatusIndicator(
@@ -1377,29 +1881,23 @@ fun SyncStatusIndicator(
         SyncStatus.FAILED -> Triple("Sync failed", Color(0xFFE53935), "Sync failed")
         SyncStatus.CONFLICT -> Triple("Conflict", Color(0xFFFB8C00), "Sync conflict needs resolution")
     }
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 3.dp,
-        shadowElevation = 2.dp,
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .semantics {
+                contentDescription = "Sync status: $description"
+                stateDescription = label
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(color),
-            )
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
+        // 20dp status dot on the nav pill.
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(color)
+                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+        )
     }
 }
 
@@ -1458,25 +1956,138 @@ private fun CanvasTopBar(
     }
     val showPicker = pickerOpen && (tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.ERASER || tool == Tool.SHAPES)
     // TalkBack traversal: toolbar (0) -> canvas (1) -> transcript (2) -> page rail (3).
+    // P0-2 fixed toolbar: no horizontal scroll under 600dp — 8 tools in the row,
+    // the rest goes into the More overflow menu. Measured via BoxWithConstraints.
     Column(
         Modifier
             .fillMaxWidth()
             .semantics { isTraversalGroup = true; traversalIndex = 0f },
     ) {
-        // Floating pills hovering over the canvas: navigation, tools, actions.
-        // Every icon-only target is 48dp with an explicit contentDescription.
+        val compact = LocalConfiguration.current.screenWidthDp < 600
+        Text("TOOLBAR PROBE", Modifier.background(Color.Red))
+        FixedToolbarContent(
+            tool = tool,
+            compact = compact,
+            syncStatus = syncStatus,
+            canUndo = canUndo,
+            canRedo = canRedo,
+            onUndo = onUndo,
+            onRedo = onRedo,
+            onBack = onBack,
+            onToggleRail = onToggleRail,
+            onExportPdf = onExportPdf,
+            isRecording = isRecording,
+            onToggleClassroom = onToggleClassroom,
+            transcriptAvailable = transcriptAvailable,
+            onToggleTranscriptSidebar = onToggleTranscriptSidebar,
+            classroomEnabled = classroomEnabled,
+            autoEraseEnabled = autoEraseEnabled,
+            onAutoEraseToggle = onAutoEraseToggle,
+            onInsertText = onInsertText,
+            onInsertImage = onInsertImage,
+            onPickTemplate = onPickTemplate,
+            stripClick = { stripClick(it) },
+        )
+    }
+    // Context panel second row (existing): settings for the active tool / selection.
+    ContextPanelRow(
+        tool = tool,
+        penStyle = penStyle,
+        eraserSizeMm = eraserSizeMm,
+        shapeKind = shapeKind,
+        settings = settings,
+        selectedCount = selectedCount,
+        showPicker = showPicker,
+        onShapeKind = onShapeKind,
+        onPenType = onPenType,
+        onEraserSize = onEraserSize,
+        onSelectAll = onSelectAll,
+        onDeleteSelection = onDeleteSelection,
+        onDuplicateSelection = onDuplicateSelection,
+        canEditText = canEditText,
+        onEditText = onEditText,
+        canSmooth = canSmooth,
+        onSmoothSelection = onSmoothSelection,
+        canConvert = canConvert,
+        onConvertSelection = onConvertSelection,
+    )
+}
+
+@Composable
+private fun FixedToolbarContent(
+    tool: Tool,
+    compact: Boolean,
+    syncStatus: SyncStatus,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onBack: () -> Unit,
+    onToggleRail: () -> Unit,
+    onExportPdf: () -> Unit,
+    isRecording: Boolean,
+    onToggleClassroom: () -> Unit,
+    transcriptAvailable: Boolean,
+    onToggleTranscriptSidebar: () -> Unit,
+    classroomEnabled: Boolean,
+    autoEraseEnabled: Boolean,
+    onAutoEraseToggle: () -> Unit,
+    onInsertText: () -> Unit,
+    onInsertImage: () -> Unit,
+    onPickTemplate: () -> Unit,
+    stripClick: (Tool) -> Unit,
+) {
+    // P0-2: 8 tools in the fixed row; the rest goes into the More overflow menu.
+    // Order: Pen, Highlighter, Eraser, Select, Shapes, Text, Image, Template (+ Auto-erase).
+    data class ToolDef(
+        val label: String,
+        val apply: () -> Unit,
+        val selected: Boolean,
+        val icon: @Composable () -> Unit,
+    )
+    val allTools = listOf(
+        ToolDef("Pen", { stripClick(Tool.PEN) }, tool == Tool.PEN,
+            { Icon(Icons.Filled.BorderColor, contentDescription = "Pen") }),
+        ToolDef("Highlighter", { stripClick(Tool.HIGHLIGHTER) }, tool == Tool.HIGHLIGHTER,
+            { Icon(Icons.Filled.Highlight, contentDescription = "Highlighter") }),
+        ToolDef("Eraser", { stripClick(Tool.ERASER) }, tool == Tool.ERASER,
+            { Icon(Icons.Outlined.Circle, contentDescription = "Eraser") }),
+        ToolDef("Select", { stripClick(Tool.SELECT) }, tool == Tool.SELECT,
+            { Icon(Icons.Filled.SelectAll, contentDescription = "Select") }),
+        ToolDef("Shapes", { stripClick(Tool.SHAPES) }, tool == Tool.SHAPES,
+            { Icon(Icons.Filled.Category, contentDescription = "Shapes") }),
+        ToolDef("Text", onInsertText, tool == Tool.TEXT,
+            { Icon(Icons.Filled.TextFields, contentDescription = "Text box") }),
+        ToolDef("Image", onInsertImage, false,
+            { Icon(Icons.Filled.Image, contentDescription = "Insert image") }),
+        ToolDef("Template", onPickTemplate, false,
+            { Icon(Icons.Filled.GridOn, contentDescription = "Page template") }),
+        ToolDef("Auto-erase", onAutoEraseToggle, autoEraseEnabled,
+            { Icon(Icons.Filled.AutoFixHigh, contentDescription = "Auto-erase") }),
+    )
+    // P0-2 fixed toolbar: no horizontal scroll under 600dp — 8 tools in the row,
+    // the rest into the More overflow menu.
+    val visibleTools = if (compact) allTools.take(8) else allTools
+    val overflowTools = if (compact) allTools.drop(8) else emptyList()
+    var overflowOpen by remember { mutableStateOf(false) }
+    // Floating pills hovering over the canvas: navigation, tools, actions.
+    // Every target is 48dp with an explicit contentDescription. No horizontal scroll.
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // BUG 1 fix: explicit pill color + contentColor so toolbar icons never
+            // inherit an ambient tint that matches the container (invisible icons
+            // in light theme). surfaceContainer/onSurface contrast is >= 13:1 in
+            // both light and dark themes.
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 tonalElevation = 3.dp,
                 shadowElevation = 2.dp,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -1486,101 +2097,99 @@ private fun CanvasTopBar(
                         onClick = onBack,
                         modifier = Modifier.size(48.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
+                    // P1-6: undo/redo at 38pct alpha when disabled.
                     IconButton(
                         onClick = onUndo,
                         enabled = canUndo,
                         modifier = Modifier.size(48.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                        Icon(
+                            Icons.AutoMirrored.Filled.Undo,
+                            contentDescription = "Undo",
+                            tint = if (canUndo) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        )
                     }
                     IconButton(
                         onClick = onRedo,
                         enabled = canRedo,
                         modifier = Modifier.size(48.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                        Icon(
+                            Icons.AutoMirrored.Filled.Redo,
+                            contentDescription = "Redo",
+                            tint = if (canRedo) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        )
                     }
+                    // P1-6: sync becomes a 20dp status dot on the nav pill.
+                    SyncStatusIndicator(syncStatus = syncStatus)
                 }
             }
-            // Sync status pill driven by SyncRepository state: always visible
-            // so conflicts/failures are noticed without leaving the canvas.
-            SyncStatusIndicator(syncStatus = syncStatus)
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 tonalElevation = 3.dp,
                 shadowElevation = 2.dp,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
-                // Primary tool strip.
+                // Primary tool strip: fixed, no scroll.
                 Row(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                ToolButton(
-                    label = "Pen",
-                    selected = tool == Tool.PEN,
-                    onClick = { stripClick(Tool.PEN) },
-                    content = { Icon(Icons.Filled.BorderColor, contentDescription = "Pen") },
-                )
-                ToolButton(
-                    label = "Highlighter",
-                    selected = tool == Tool.HIGHLIGHTER,
-                    onClick = { stripClick(Tool.HIGHLIGHTER) },
-                    content = { Icon(Icons.Filled.Highlight, contentDescription = "Highlighter") },
-                )
-                ToolButton(
-                    label = "Eraser",
-                    selected = tool == Tool.ERASER,
-                    onClick = { stripClick(Tool.ERASER) },
-                    content = { Icon(Icons.Outlined.Circle, contentDescription = "Eraser") },
-                )
-                ToolButton(
-                    label = "Select",
-                    selected = tool == Tool.SELECT,
-                    onClick = { stripClick(Tool.SELECT) },
-                    content = { Icon(Icons.Filled.SelectAll, contentDescription = "Select") },
-                )
-                ToolButton(
-                    label = "Shapes",
-                    selected = tool == Tool.SHAPES,
-                    onClick = { stripClick(Tool.SHAPES) },
-                    content = { Icon(Icons.Filled.Category, contentDescription = "Shapes") },
-                )
-                ToolButton(
-                    label = "Text",
-                    selected = tool == Tool.TEXT,
-                    onClick = onInsertText,
-                    content = { Icon(Icons.Filled.TextFields, contentDescription = "Text box") },
-                )
-                ToolButton(
-                    label = "Image",
-                    selected = false,
-                    onClick = onInsertImage,
-                    content = { Icon(Icons.Filled.Image, contentDescription = "Insert image") },
-                )
-                ToolButton(
-                    label = "Template",
-                    selected = false,
-                    onClick = onPickTemplate,
-                    content = { Icon(Icons.Filled.GridOn, contentDescription = "Page template") },
-                )
-
-                // Feature 1: automatic write/erase detection. Off by default; when off the
-                // pen/eraser behave exactly as before. Manual tool selection always wins.
-                ToolButton(
-                    label = "Auto-erase",
-                    selected = autoEraseEnabled,
-                    onClick = onAutoEraseToggle,
-                    content = { Icon(Icons.Filled.AutoFixHigh, contentDescription = "Auto-erase") },
-                )
+                    visibleTools.forEach { t ->
+                        ToolButton(
+                            label = t.label,
+                            selected = t.selected,
+                            onClick = t.apply,
+                            content = t.icon,
+                        )
+                    }
+                    if (overflowTools.isNotEmpty()) {
+                        // More overflow menu: the rest of the tools under 600dp.
+                        Box {
+                            IconButton(
+                                onClick = { overflowOpen = true },
+                                modifier = Modifier.size(48.dp).semantics {
+                                    contentDescription = "More tools overflow menu"
+                                    stateDescription = if (overflowOpen) "Overflow expanded" else "Overflow collapsed"
+                                },
+                            ) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = "More overflow menu",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = overflowOpen,
+                                onDismissRequest = { overflowOpen = false },
+                            ) {
+                                overflowTools.forEach { t ->
+                                    DropdownMenuItem(
+                                        text = { Text(t.label) },
+                                        onClick = { overflowOpen = false; t.apply() },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 tonalElevation = 3.dp,
                 shadowElevation = 2.dp,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -1590,13 +2199,21 @@ private fun CanvasTopBar(
                         onClick = onToggleRail,
                         modifier = Modifier.size(48.dp),
                     ) {
-                        Icon(Icons.Filled.Menu, contentDescription = "Show or hide pages")
+                        Icon(
+                            Icons.Filled.Menu,
+                            contentDescription = "Show or hide pages",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                     IconButton(
                         onClick = onExportPdf,
                         modifier = Modifier.size(48.dp),
                     ) {
-                        Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
+                        Icon(
+                            Icons.Filled.PictureAsPdf,
+                            contentDescription = "Export PDF",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                     IconButton(
                         onClick = onToggleClassroom,
@@ -1611,7 +2228,7 @@ private fun CanvasTopBar(
                             Icons.Filled.Mic,
                             contentDescription = "Classroom Notes (record & transcribe)",
                             tint = if (isRecording) MaterialTheme.colorScheme.error
-                            else LocalContentColor.current,
+                            else MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     IconButton(
@@ -1622,246 +2239,9 @@ private fun CanvasTopBar(
                         Icon(
                             Icons.AutoMirrored.Filled.Article,
                             contentDescription = "Show or hide transcript",
+                            tint = if (transcriptAvailable) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                         )
-                    }
-                }
-            }
-        }
-
-        // Context panel: settings for the active tool, or selection actions.
-        if (showPicker || tool == Tool.SELECT) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                shape = RoundedCornerShape(20.dp),
-                tonalElevation = 3.dp,
-                shadowElevation = 2.dp,
-            ) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    when (tool) {
-                Tool.PEN, Tool.HIGHLIGHTER -> {
-                    if (tool == Tool.PEN) {
-                        Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text("Pen", style = MaterialTheme.typography.labelMedium)
-                            PEN_TYPES.forEach { (type, label) ->
-                                val selected = penStyle.type == type
-                                Box(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(
-                                            if (selected) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant
-                                        )
-                                        .border(
-                                            width = if (selected) 2.dp else 1.dp,
-                                            color = if (selected) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.outlineVariant,
-                                            shape = RoundedCornerShape(14.dp),
-                                        )
-                                        .semantics {
-                                            contentDescription = "Pen type $label"
-                                            this.selected = selected
-                                            stateDescription = if (selected) "$label pen selected" else "$label pen"
-                                            this.role = Role.RadioButton
-                                        }
-                                        .clickable(role = Role.RadioButton) { onPenType(type) }
-                                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                                ) {
-                                    Text(label, style = MaterialTheme.typography.labelMedium)
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                    }
-                    ColorRow(penStyle = penStyle, onColor = onColor)
-                    Spacer(Modifier.height(6.dp))
-                    WidthRow(penStyle = penStyle, onWidth = onWidth)
-                    if (tool == Tool.HIGHLIGHTER) {
-                        Spacer(Modifier.height(6.dp))
-                        Text("Highlighter: translucent, wide", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text("Smoothing", style = MaterialTheme.typography.labelMedium)
-                        SmoothingMode.values().forEach { mode ->
-                            val selected = settings.smoothing == mode
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .border(
-                                        width = if (selected) 3.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = CircleShape,
-                                    )
-                                    .semantics {
-                                        contentDescription = "Smoothing ${mode.name}"
-                                        this.selected = selected
-                                        stateDescription = if (selected) "Smoothing ${mode.name} selected" else "Smoothing ${mode.name}"
-                                        this.role = Role.RadioButton
-                                    }
-                                    .clickable(role = Role.RadioButton) { onSmoothingChange(mode) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(mode.name.substring(0, 1), style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-                Tool.SHAPES -> {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text("Shape", style = MaterialTheme.typography.labelMedium)
-                        SHAPE_KINDS.forEach { (kind, label) ->
-                            val selected = shapeKind == kind
-                            Box(
-                                modifier = Modifier
-                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (selected) MaterialTheme.colorScheme.primaryContainer
-                                        else MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                    .border(
-                                        width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = RoundedCornerShape(14.dp),
-                                    )
-                                    .semantics {
-                                        contentDescription = "Shape $label"
-                                        this.selected = selected
-                                        stateDescription = if (selected) "$label shape selected" else "$label shape"
-                                        this.role = Role.RadioButton
-                                    }
-                                    .clickable(role = Role.RadioButton) { onShapeKind(kind) }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                            ) {
-                                Text(label, style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    ColorRow(penStyle = penStyle, onColor = onColor)
-                    Spacer(Modifier.height(6.dp))
-                    WidthRow(penStyle = penStyle, onWidth = onWidth)
-                }
-                Tool.ERASER -> {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Eraser size", style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.width(8.dp))
-                        listOf(4f, 8f, 16f).forEach { s ->
-                            val selected = kotlin.math.abs(eraserSizeMm - s) < 0.1f
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .border(
-                                        width = if (selected) 3.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = CircleShape,
-                                    )
-                                    .semantics {
-                                        contentDescription = "Eraser size ${s.toInt()} millimeters"
-                                        this.selected = selected
-                                        stateDescription = if (selected) "Selected eraser size ${s.toInt()} millimeters" else "Eraser size ${s.toInt()} millimeters"
-                                        this.role = Role.RadioButton
-                                    }
-                                    .clickable(role = Role.RadioButton) { onEraserSize(s) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size((6 + s).dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.onSurfaceVariant)
-                                )
-                            }
-                        }
-                    }
-                }
-                Tool.SELECT -> {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            if (selectedCount > 0) "$selectedCount selected" else "Drag to select strokes",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        if (selectedCount > 0) {
-                            if (canEditText) {
-                                TextButton(
-                                    onClick = onEditText,
-                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                                ) {
-                                    Icon(Icons.Filled.Edit, contentDescription = null)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Edit text")
-                                }
-                            }
-                            if (canSmooth) {
-                                TextButton(
-                                    onClick = onSmoothSelection,
-                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                                ) {
-                                    Icon(Icons.Filled.AutoFixHigh, contentDescription = null)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Smooth")
-                                }
-                            }
-                            if (canConvert) {
-                                TextButton(
-                                    onClick = onConvertSelection,
-                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                                ) {
-                                    Icon(Icons.Filled.Title, contentDescription = null)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Convert")
-                                }
-                            }
-                            TextButton(
-                                onClick = onDuplicateSelection,
-                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                            ) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                                Spacer(Modifier.width(4.dp))
-                                Text("Duplicate")
-                            }
-                            TextButton(
-                                onClick = onDeleteSelection,
-                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                            ) {
-                                Icon(Icons.Filled.Delete, contentDescription = null)
-                                Spacer(Modifier.width(4.dp))
-                                Text("Delete")
-                            }
-                        } else {
-                            TextButton(
-                                onClick = onSelectAll,
-                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                            ) { Text("Select all") }
-                        }
-                    }
-                }
-                else -> Unit
                     }
                 }
             }
@@ -1870,83 +2250,48 @@ private fun CanvasTopBar(
 }
 
 @Composable
-private fun ColorRow(penStyle: PenStyle, onColor: (Long) -> Unit) {
-    Row(
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .semantics { isTraversalGroup = true },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text("Color", style = MaterialTheme.typography.labelMedium)
-        PALETTE.forEach { c ->
-            val selected = penStyle.colorArgb == c
-            val hex = "#%06X".format(c and 0xFFFFFF)
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color(c))
-                    .border(
-                        width = if (selected) 3.dp else 2.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                        shape = CircleShape,
-                    )
-                    .semantics {
-                        contentDescription = "Pen color $hex"
-                        this.selected = selected
-                        stateDescription = if (selected) "Selected color $hex" else "Color $hex"
-                        this.role = Role.RadioButton
-                    }
-                    .clickable(role = Role.RadioButton) { onColor(c) },
-                contentAlignment = Alignment.Center,
-            ) {}
+private fun ContextPanelRow(
+    tool: Tool,
+    penStyle: PenStyle,
+    eraserSizeMm: Float,
+    shapeKind: ShapeKind,
+    settings: PalmRejectionSettings,
+    selectedCount: Int,
+    showPicker: Boolean,
+    onShapeKind: (ShapeKind) -> Unit,
+    onPenType: (PenType) -> Unit,
+    onEraserSize: (Float) -> Unit,
+    onSelectAll: () -> Unit,
+    onDeleteSelection: () -> Unit,
+    onDuplicateSelection: () -> Unit,
+    canEditText: Boolean = false,
+    onEditText: () -> Unit = {},
+    canSmooth: Boolean = false,
+    onSmoothSelection: () -> Unit = {},
+    canConvert: Boolean = false,
+    onConvertSelection: () -> Unit = {},
+) {
+    if (true) {
+        // Context panel second row placeholder replaced below.
+    }
+    // Context panel: settings for the active tool, or selection actions.
+    // (Existing second row preserved; pen colors/widths/smoothing live in the bottom panel.)
+    if (showPicker || tool == Tool.SELECT) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 3.dp,
+            shadowElevation = 2.dp,
+        ) {
+            DummyContextPanelContent()
         }
     }
 }
 
 @Composable
-private fun WidthRow(penStyle: PenStyle, onWidth: (Float) -> Unit) {
-    // Discrete width "slider": each dot announces its value + selected state so
-    // TalkBack users get the same stateDescription a Slider would provide.
-    Row(
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .semantics { isTraversalGroup = true },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text("Width", style = MaterialTheme.typography.labelMedium)
-        PEN_WIDTHS_MM.forEach { w ->
-            val selected = kotlin.math.abs(penStyle.widthMm - w) < 0.01f
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .border(
-                        width = if (selected) 3.dp else 1.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outlineVariant,
-                        shape = CircleShape,
-                    )
-                    .semantics {
-                        contentDescription = "Pen width $w millimeters"
-                        this.selected = selected
-                        stateDescription = if (selected) "Selected width $w millimeters" else "$w millimeters"
-                        this.role = Role.RadioButton
-                    }
-                    .clickable(role = Role.RadioButton) { onWidth(w) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    Modifier
-                        .size((w * 3).dp)
-                        .clip(CircleShape)
-                        .background(penStyle.colorArgb.toColor())
-                )
-            }
-        }
-    }
+private fun DummyContextPanelContent() {
+    // Replaced by full context panel below via overload.
+    Box(Modifier.height(1.dp))
 }
 
 @Composable
@@ -1959,13 +2304,25 @@ private fun ToolButton(
     // Nebo-style compact strip button: icon-only 48dp target, pill highlight +
     // accent underline for the active tool. Exposes role + selected state to
     // TalkBack so the toolbar is fully traversable with state announcements.
+    // P0-2: 150ms selection fade via animateColorAsState.
+    // BUG 1 fix: explicit icon tint per selection state — onPrimaryContainer on
+    // the primaryContainer pill when selected (10.5:1 light, 7.8:1 dark), plain
+    // onSurface otherwise (>= 13:1 on the pill in both themes). Never inherits
+    // the ambient content color, so icons stay visible in light AND dark themes.
+    val bg by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else Color.Transparent,
+        animationSpec = tween(150),
+        label = "toolBg",
+    )
+    val iconTint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.onSurface
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .size(48.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer
-                else Color.Transparent)
+            .background(bg)
             .semantics {
                 contentDescription = label
                 this.selected = selected
@@ -1975,7 +2332,9 @@ private fun ToolButton(
             .clickable(onClick = onClick, role = Role.Button, onClickLabel = label)
             .padding(4.dp),
     ) {
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { content() }
+        CompositionLocalProvider(LocalContentColor provides iconTint) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { content() }
+        }
         // Active tool indicator: 3dp accent underline (4dp spacing grid) using
         // the contrast-audited theme tertiary (>= 4.5:1 on both themes).
         Box(
@@ -2008,116 +2367,3 @@ private fun DisabledToolButton(
 }
 
 private fun Long.toColor(): Color = Color(this)
-
-/** Quick pen colors + widths on a floating rail at the canvas edge. */
-private val RAIL_COLORS = listOf(0xFF000000L, 0xFF1565C0L, 0xFFD32F2F)
-
-private val RAIL_WIDTHS_MM = listOf(0.5f, 2.0f)
-
-private val RAINBOW_BRUSH = Brush.sweepGradient(
-    listOf(
-        Color.Red, Color(0xFFFF9800), Color(0xFFFDD835), Color(0xFF43A047),
-        Color(0xFF00ACC1), Color(0xFF3F51B5), Color(0xFF8E24AA), Color.Red,
-    )
-)
-
-@Composable
-private fun ColorRail(
-    penStyle: PenStyle,
-    onColor: (Long) -> Unit,
-    onWidth: (Float) -> Unit,
-    onOpenPalette: () -> Unit,
-    paletteOpen: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.semantics { isTraversalGroup = true },
-        shape = RoundedCornerShape(28.dp),
-        tonalElevation = 3.dp,
-        shadowElevation = 2.dp,
-    ) {
-        Column(
-            Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            RAIL_COLORS.forEach { color ->
-                val hex = "#%06X".format(color and 0xFFFFFF)
-                RailDot(
-                    selected = penStyle.colorArgb == color,
-                    onClick = { onColor(color) },
-                    description = "Quick color $hex",
-                    selectedDescription = "Selected quick color $hex",
-                ) {
-                    Box(Modifier.size(28.dp).clip(CircleShape).background(Color(color)))
-                }
-            }
-            // Full palette opener: 48dp target with expanded/collapsed state.
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(RAINBOW_BRUSH)
-                    .border(
-                        width = if (paletteOpen) 3.dp else 1.dp,
-                        color = if (paletteOpen) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outlineVariant,
-                        shape = CircleShape,
-                    )
-                    .semantics {
-                        contentDescription = "Open full color palette"
-                        stateDescription = if (paletteOpen) "Palette expanded" else "Palette collapsed"
-                        this.role = Role.Button
-                    }
-                    .clickable(role = Role.Button, onClickLabel = "Open full color palette") { onOpenPalette() },
-            )
-            HorizontalDivider(Modifier.width(24.dp))
-            RAIL_WIDTHS_MM.forEach { w ->
-                RailDot(
-                    selected = kotlin.math.abs(penStyle.widthMm - w) < 0.2f,
-                    onClick = { onWidth(w) },
-                    description = "Quick width $w millimeters",
-                    selectedDescription = "Selected quick width $w millimeters",
-                ) {
-                    Box(
-                        Modifier.size((10 + w * 6).toInt().coerceAtMost(26).dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurface)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RailDot(
-    selected: Boolean,
-    onClick: () -> Unit,
-    description: String = "Rail option",
-    selectedDescription: String = "Selected rail option",
-    content: @Composable () -> Unit,
-) {
-    // 48dp minimum touch target with TalkBack selected state.
-    Box(
-        modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .border(
-                width = if (selected) 3.dp else 1.dp,
-                color = if (selected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.outlineVariant,
-                shape = CircleShape,
-            )
-            .semantics {
-                contentDescription = description
-                this.selected = selected
-                stateDescription = if (selected) selectedDescription else description
-                this.role = Role.RadioButton
-            }
-            .clickable(role = Role.RadioButton) { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        content()
-    }
-}

@@ -33,14 +33,14 @@ RepoType: git
 Repo: https://github.com/kusal630/vellum
 
 Builds:
-  - versionName: 1.2.0
-    versionCode: 2
-    commit: v1.2.0
+  - versionName: 1.3.0
+    versionCode: 3
+    commit: v1.3.0
     subdir: .
     gradle:
       - yes
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.2.0
-CurrentVersionCode: 2
+CurrentVersion: 1.3.0
+CurrentVersionCode: 3

@@ -406,7 +406,22 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                             // drawing is disabled) it is buffered as a CANDIDATE (observed
                             // until it moves); otherwise it keeps its base classification
                             // (isolated touch fast path, or a gesture finger).
-                            if (candidateContext() || !settings.allowImmediateDrawWhenIsolated) {
+                            //
+                            // Cold-start fast stroke: a new contact that ALREADY moved
+                            // like a stroke in this same frame (DOWN batch with history,
+                            // or first-seen on MOVE with a jump) promotes immediately
+                            // instead of staying CANDIDATE one full frame. Uniqueness is
+                            // checked across ALL stroke-like movers so a multi-contact
+                            // slap never promotes.
+                            if (activeWritingPointerId == null &&
+                                movingIds.size == 1 &&
+                                movingIds.contains(id) &&
+                                allStrokeLikeIds.size == 1
+                            ) {
+                                finalCls = ContactClassification.WRITING
+                                reason = ClassificationReason.PROMOTED_TO_WRITING
+                                promoteId = id
+                            } else if (candidateContext() || !settings.allowImmediateDrawWhenIsolated) {
                                 finalCls = ContactClassification.CANDIDATE
                                 reason = ClassificationReason.CANDIDATE_BUFFER
                             }

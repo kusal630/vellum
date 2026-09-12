@@ -47,7 +47,7 @@ class AudioCaptureService : Service() {
                 if (pageId != null && pageId > 0) startRecording(pageId)
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startRecording(pageId: Long) {
@@ -89,13 +89,13 @@ class AudioCaptureService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Classroom Notes recording")
-            .setContentText("Transcribing on-device…")
+            .setContentTitle(getString(R.string.recording_notification_title))
+            .setContentText(getString(R.string.recording_notification_text))
             .setSmallIcon(R.drawable.ic_mic)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(0, "Stop", stopIntent)
+            .addAction(0, getString(R.string.recording_notification_stop), stopIntent)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -166,7 +166,7 @@ class AudioCaptureService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Classroom recording",
+            getString(R.string.recording_channel_name),
             NotificationManager.IMPORTANCE_LOW,
         )
         nm.createNotificationChannel(channel)

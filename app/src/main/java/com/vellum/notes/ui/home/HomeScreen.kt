@@ -334,7 +334,7 @@ fun HomeScreen(
     var veilIn by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         veilIn = true
-        kotlinx.coroutines.delay(900)
+        kotlinx.coroutines.delay(400)
         veil = false
     }
     // Full-text page matches for the current query (notebook ids). One-shot per

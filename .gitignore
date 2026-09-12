@@ -13,6 +13,12 @@ app/schemas/
 *.aab
 /gradle/gradle-daemon-jvm.properties
 
+# Release keystores — never commit. See docs/release-signing.md.
+*.keystore
+*.jks
+vellum-release.keystore
+app/vellum-release.keystore
+
 # Vosk speech model — populated at build time by the downloadVoskModel Gradle task
 # (~40 MB, Apache-2.0). Only the README.txt placeholder is kept in version control.
 app/src/main/assets/vosk/model/am/

@@ -40,6 +40,12 @@ data class PalmRejectionSettings(
      */
     var palmZone: PalmZone = PalmZone(),
     /**
+     * MUSE-P0-3 first-run coachmark: true until the user dismisses the
+     * "Rest your palm here" bubble near the palm-zone handle. Persisted via
+     * DataStore so it shows once per install.
+     */
+    var showPalmZoneCoachmark: Boolean = true,
+    /**
      * Allows a bare finger to become the writing pointer while palm rejection stays
      * active: in WRITING/STRICT modes a finger-sized contact is accepted as writing,
      * and the writing lock still rejects any additional (palm) contact.

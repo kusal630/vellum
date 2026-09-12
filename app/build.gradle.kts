@@ -28,15 +28,23 @@ android {
     }
 
     signingConfigs {
-        // Release signing via gradle.properties (generated key in repo root for CI/local).
-        // For production, use a secure keystore not committed to git.
+        // Release signing reads exclusively from environment variables.
+        // Never commit keystores or passwords — see docs/release-signing.md.
+        // Required vars: VELLUM_STORE_FILE, VELLUM_STORE_PASSWORD, VELLUM_KEY_ALIAS, VELLUM_KEY_PASSWORD.
         create("release") {
-            val keystorePath = System.getenv("VELLUM_KEYSTORE_PATH") ?: project.findProperty("VELLUM_KEYSTORE_PATH") as String?
-            if (!keystorePath.isNullOrBlank()) {
-                storeFile = file(keystorePath)
-                storePassword = System.getenv("VELLUM_KEYSTORE_PASSWORD") ?: project.findProperty("VELLUM_STORE_PASSWORD") as String?
-                keyAlias = System.getenv("VELLUM_KEY_ALIAS") ?: project.findProperty("VELLUM_KEY_ALIAS") as String?
-                keyPassword = System.getenv("VELLUM_KEY_PASSWORD") ?: project.findProperty("VELLUM_KEY_PASSWORD") as String?
+            val storeFilePath = System.getenv("VELLUM_STORE_FILE")
+            val storePasswordValue = System.getenv("VELLUM_STORE_PASSWORD")
+            val keyAliasValue = System.getenv("VELLUM_KEY_ALIAS")
+            val keyPasswordValue = System.getenv("VELLUM_KEY_PASSWORD")
+            if (!storeFilePath.isNullOrBlank() &&
+                !storePasswordValue.isNullOrBlank() &&
+                !keyAliasValue.isNullOrBlank() &&
+                !keyPasswordValue.isNullOrBlank()
+            ) {
+                storeFile = file(storeFilePath)
+                storePassword = storePasswordValue
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
             }
         }
     }
@@ -49,8 +57,32 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            val keystorePath = System.getenv("VELLUM_KEYSTORE_PATH") ?: project.findProperty("VELLUM_KEYSTORE_PATH") as String?
-            if (!keystorePath.isNullOrBlank()) {
+            val missingSigningVars = listOf(
+                "VELLUM_STORE_FILE",
+                "VELLUM_STORE_PASSWORD",
+                "VELLUM_KEY_ALIAS",
+                "VELLUM_KEY_PASSWORD"
+            ).filter { System.getenv(it).isNullOrBlank() }
+            // Release-only gate: configuration-time throw would break EVERY task
+            // (assembleDebug, unit tests, help, etc.). Only fail when a release
+            // artifact is actually requested.
+            val requestedTasks = gradle.startParameter.taskNames
+            val isReleaseRequested = requestedTasks.any {
+                it.contains("release", ignoreCase = true) ||
+                    it.contains("bundle", ignoreCase = true) ||
+                    it.contains("publish", ignoreCase = true)
+            }
+            if (missingSigningVars.isNotEmpty()) {
+                if (isReleaseRequested) {
+                    throw GradleException(
+                        "Release signing requires environment variables missing: " +
+                            missingSigningVars.joinToString(", ") +
+                            ". Set VELLUM_STORE_FILE, VELLUM_STORE_PASSWORD, " +
+                            "VELLUM_KEY_ALIAS, VELLUM_KEY_PASSWORD. " +
+                            "See docs/release-signing.md."
+                    )
+                }
+            } else {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

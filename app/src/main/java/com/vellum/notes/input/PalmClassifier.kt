@@ -292,7 +292,20 @@ class PalmClassifier(
 
         // --- Cold start: no observed ranges yet. Use the user's configured thresholds. ---
         if (avgValid == null && avgPalm == null) {
-            return classifyWithSettings(contact, ctx)
+            val settingsResult = classifyWithSettings(contact, ctx)
+            // On cold start a WRITING classification from pure settings thresholds is too
+            // eager — a small-ellipse palm-first-down would emit ink before motion or
+            // size/pressure evidence confirms it. Buffer as CANDIDATE instead so the
+            // resting-hand tracker promotes it only when it moves like a stroke.
+            if (settingsResult.classification == ContactClassification.WRITING) {
+                return ClassificationResult(
+                    ContactClassification.CANDIDATE,
+                    settingsResult.confidence * 0.6f,
+                    ClassificationReason.CANDIDATE_BUFFER,
+                    settingsResult.effectiveThresholdMm,
+                )
+            }
+            return settingsResult
         }
 
         // --- Adaptive: compare against this device's observed ranges. ---

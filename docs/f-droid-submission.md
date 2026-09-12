@@ -14,7 +14,7 @@ request is opened there.
 ## Submission checklist
 
 1. Commit and push this repository to a public GitHub/GitLab repository.
-2. Tag the release: `git tag v1.0.0 && git push origin v1.0.0`.
+2. Tag the release: `git tag v1.3.0 && git push origin v1.3.0`.
 3. Every future release: bump `versionCode` and `versionName` in
    `app/build.gradle.kts`, then tag `vX.Y.Z`.
 4. Provide screenshots (see below) and place them under
@@ -46,8 +46,8 @@ Categories:
 License: GPL-3.0-or-later
 AuthorName: codeRed
 WebSite:
-SourceCode: https://github.com/YOUR-USER/premium-notes
-IssueTracker: https://github.com/YOUR-USER/premium-notes/issues
+SourceCode: https://github.com/kusal630/vellum
+IssueTracker: https://github.com/kusal630/vellum/issues
 
 AutoName: Vellum
 Summary: Offline handwriting notes with palm rejection
@@ -71,20 +71,20 @@ Description: |
   permission, so audio never leaves the device.
 
 RepoType: git
-Repo: https://github.com/YOUR-USER/premium-notes
+Repo: https://github.com/kusal630/vellum
 
 Builds:
-  - versionName: 1.0.0
-    versionCode: 1
-    commit: v1.0.0
+  - versionName: 1.3.0
+    versionCode: 3
+    commit: v1.3.0
     subdir: .
     gradle:
       - yes
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.0.0
-CurrentVersionCode: 1
+CurrentVersion: 1.3.0
+CurrentVersionCode: 3
 ```
 
-> Replace `YOUR-USER` with the real repository owner when the repo is public.
+> Repository identity is github.com/kusal630/vellum.

@@ -6,6 +6,8 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 
 > ⬇️ **Download:** grab the latest APK from [**Releases**](https://github.com/kusal630/vellum/releases) (`app-release.apk`, release-signed, ~90MB — includes the on-device speech model).
 
+> ☕ Enjoying Vellum? [**Support development**](https://buymeacoffee.com/kusal630) — every coffee keeps it offline, private, and free.
+
 ## ✨ Features
 
 | Area | What you get |
@@ -72,12 +74,26 @@ The model is not committed to the repository. Builds without it still succeed; t
 
 ## 🗺️ Roadmap
 
+## 🆕 What's New in v1.3.0
+
+- **Stability**: deferred bitmap recycle (no more recycled-bitmap crashes), clip-bounds fallback, safe `editorState` unwrapping
+- **Input pipeline**: flags (`FLAG_CANCELED`), edge flags, and stylus hover distance now flow through the parser into the engine — OS-detected palms are rejected immediately
+- **Performance**: `displayStrokes` allocation elimination, O(1) content-extent caching, zero-allocation hot draw path
+- **Accessibility**: TalkBack labels on toolbar buttons, 48dp touch targets, dark-mode contrast ≥4.5:1
+- **Syncthing sync**: conflict resolution UI (keep local / keep remote / merge), sync status indicator, exponential-backoff retry
+- **Polish**: floating toolbar, dark mode palette, palette rail
+- **Release**: ProGuard keep rules for palm engine / input models, reproducible F-Droid metadata, release-signed APK
+
 - Auto shape recognition + handwriting alignment
 - Tags + full-text search (Room FTS)
 - Versioned ZIP backup + scheduled local auto-backup
 - Home-screen widgets + app shortcuts
 - Voice canvas commands, spotlight focus mode
 - Audio-note sync replay
+
+## ☕ Support
+
+Vellum is free, offline, and GPL-3.0 — no ads, no tracking, no paywalls. If it earns its keep in your pocket, [**buy me a coffee**](https://buymeacoffee.com/kusal630) to fund devices for palm-rejection calibration, F-Droid/Play fees, and late-night ink-smoothing sessions.
 
 ## 📄 License
 

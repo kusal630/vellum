@@ -19,10 +19,13 @@ class PalmClassifierTest {
     }
 
     @Test
-    fun smallPenContactIsWriting() {
+    fun smallPenContactIsCandidateOnColdStart() {
         val r = classify(TestTouchFactory.pen(majorPx = 26f, minorPx = 24f))
-        assertEquals(ContactClassification.WRITING, r.classification)
-        assertTrue(r.confidence > 0.8f)
+        // On cold start (no history) a lone small contact is buffered as CANDIDATE
+        // until velocity or size/pressure confirms it — palm-first-down must never
+        // emit ink before evidence.
+        assertEquals(ContactClassification.CANDIDATE, r.classification)
+        assertEquals(ClassificationReason.CANDIDATE_BUFFER, r.reason)
     }
 
     @Test
@@ -55,7 +58,8 @@ class PalmClassifierTest {
     @Test
     fun unknownToolTypeFallsBackToGeometry() {
         val small = classify(TestTouchFactory.pen(toolType = TestTouchFactory.TOOL_UNKNOWN))
-        assertEquals(ContactClassification.WRITING, small.classification)
+        // Cold start -> CANDIDATE (no history)
+        assertEquals(ContactClassification.CANDIDATE, small.classification)
         val large = classify(TestTouchFactory.palm(toolType = TestTouchFactory.TOOL_UNKNOWN))
         assertEquals(ContactClassification.PALM, large.classification)
     }
@@ -86,7 +90,9 @@ class PalmClassifierTest {
             fingerWritingEnabled = true,
         )
         val r = classify(TestTouchFactory.fingertip(), mode = PalmRejectionMode.WRITING, ctx = ctx)
-        assertEquals(ContactClassification.WRITING, r.classification)
+        // Cold start -> CANDIDATE (not WRITING; fingerprint alone on cold start is buffered)
+        assertEquals(ContactClassification.CANDIDATE, r.classification)
+        assertEquals(ClassificationReason.CANDIDATE_BUFFER, r.reason)
     }
 
     @Test
@@ -172,7 +178,8 @@ class PalmClassifierTest {
         // With default calibration the same contact would be accepted as writing.
         val defaults = PalmClassifier(testSettings(mode = strict))
         val r2 = defaults.classify(normal, PalmClassifier.ClassifyContext(mode = strict))
-        assertEquals(ContactClassification.WRITING, r2.classification)
+        // Cold start: WRITING-classified contacts become CANDIDATE
+        assertEquals(ContactClassification.CANDIDATE, r2.classification)
     }
 
     @Test

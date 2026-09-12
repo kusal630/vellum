@@ -15,7 +15,6 @@ import com.vellum.notes.model.ShapeObject
 import com.vellum.notes.model.Stroke
 import com.vellum.notes.speech.SpeechController
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,7 +38,6 @@ class EditorViewModel(
     private val _editor = MutableStateFlow<NoteEditorState?>(null)
     val editor: StateFlow<NoteEditorState?> = _editor.asStateFlow()
 
-    private var saveJob: Job? = null
     /** Serializes Room writes so rapid edits can never interleave or starve each other. */
     private val saveMutex = kotlinx.coroutines.sync.Mutex()
 
@@ -52,18 +50,15 @@ class EditorViewModel(
             SpeechController.setSegments(content.transcript)
 
             // Incremental autosave with debounce — no per-point DB writes.
-            viewModelScope.launch {
-                state.content
-                    .debounce(700)
-                    .collectLatest { c ->
-                        saveJob?.cancel()
-                        saveJob = viewModelScope.launch {
-                            saveMutex.withLock {
-                                runCatching { repository.savePageContent(pageId, c) }
-                            }
-                        }
+            // collectLatest already cancels the prior save block, so no nested
+            // launch / saveJob tracking is needed.
+            state.content
+                .debounce(700)
+                .collectLatest { c ->
+                    saveMutex.withLock {
+                        runCatching { repository.savePageContent(pageId, c) }
                     }
-            }
+                }
         }
     }
 
@@ -184,12 +179,11 @@ class EditorViewModel(
      * Reloads the page content from storage, replacing the in-memory state.
      * Used after a version-history restore so the canvas shows the restored
      * content immediately; the undo stack resets (the restore itself stays
-     * reversible through history). The pending autosave is cancelled first so
-     * stale in-memory content cannot overwrite the restore.
+     * reversible through history). The load runs under saveMutex so an
+     * in-flight autosave cannot interleave with the reload.
      */
     fun refreshContent() {
         viewModelScope.launch {
-            saveJob?.cancel()
             saveMutex.withLock {
                 val content = repository.loadPageContent(pageId) ?: PageContent()
                 _editor.value = NoteEditorState(content)
@@ -199,7 +193,6 @@ class EditorViewModel(
     }
 
     override fun onCleared() {
-        saveJob?.cancel()
         // Flush the latest content synchronously so work done just before navigating away
         // (back, page switch, process recreation) is never lost. IO dispatcher: never blocks
         // the main thread's Looper, avoiding the ANR the old main-thread flush risked.

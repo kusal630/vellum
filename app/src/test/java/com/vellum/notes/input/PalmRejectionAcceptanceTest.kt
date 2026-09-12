@@ -1,6 +1,7 @@
 package com.vellum.notes.input
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -69,19 +70,25 @@ class PalmRejectionAcceptanceTest {
     fun case2_writingFirst_thenPalmLandsMidStroke() {
         val e = engine()
 
-        val down = e.process(
+        // Pen starts writing (cold start -> CANDIDATE), then a MOVE promotes it.
+        e.process(
             TestTouchFactory.frame(
                 InputAction.DOWN, 0L, listOf(pen(0, 200f, 200f, 0L)), added = 0,
             )
         )
-        assertEquals(ContactClassification.WRITING, down.contactFor(0)?.classification)
-        assertEquals(0, down.activeWritingPointerId)
+        val penMove = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L, listOf(pen(0, 240f, 220f, 5L)),
+            )
+        )
+        assertEquals(ContactClassification.WRITING, penMove.contactFor(0)?.classification)
+        assertEquals(0, penMove.activeWritingPointerId)
 
         // Palm lands mid-stroke: the stroke must continue, the palm is rejected.
         val palmJoins = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 10L,
-                listOf(pen(0, 200f, 200f, 0L), palm(2, 500f, 700f, 10L)), added = 2,
+                listOf(pen(0, 240f, 220f, 5L), palm(2, 500f, 700f, 10L)), added = 2,
             )
         )
         assertEquals(ContactClassification.WRITING, palmJoins.contactFor(0)?.classification)
@@ -91,7 +98,7 @@ class PalmRejectionAcceptanceTest {
         val move = e.process(
             TestTouchFactory.frame(
                 InputAction.MOVE, 20L,
-                listOf(pen(0, 240f, 220f, 0L), palm(2, 500f, 700f, 10L)),
+                listOf(pen(0, 280f, 250f, 5L), palm(2, 500f, 700f, 10L)),
             )
         )
         assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
@@ -102,19 +109,21 @@ class PalmRejectionAcceptanceTest {
     fun case3_writeWithoutPalm_writes() {
         val e = engine()
 
+        // Cold start: lone contact is CANDIDATE (buffered, not writing), no lock.
         val down = e.process(
             TestTouchFactory.frame(
                 InputAction.DOWN, 0L, listOf(pen(0, 200f, 200f, 0L)), added = 0,
             )
         )
-        assertEquals(ContactClassification.WRITING, down.contactFor(0)?.classification)
-        assertEquals(0, down.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
+        assertNull(down.activeWritingPointerId)
 
+        // MOVE with enough distance (>=40px=4mm) to the stroke gate promotes to WRITING.
         var last = down
         var x = 200f
         var t = 10L
         while (t <= 60L) {
-            x += 20f
+            x += 40f
             last = e.process(
                 TestTouchFactory.frame(
                     InputAction.MOVE, t, listOf(pen(0, x, 200f, 0L)),
@@ -130,6 +139,7 @@ class PalmRejectionAcceptanceTest {
     fun case4_writePalmJoinsAndWritingContinues_keepsWriting() {
         val e = engine()
 
+        // Pen starts: cold start -> CANDIDATE, promote via MOVE.
         e.process(
             TestTouchFactory.frame(
                 InputAction.DOWN, 0L, listOf(pen(0, 200f, 200f, 0L)), added = 0,
@@ -137,8 +147,13 @@ class PalmRejectionAcceptanceTest {
         )
         e.process(
             TestTouchFactory.frame(
+                InputAction.MOVE, 5L, listOf(pen(0, 240f, 220f, 5L)),
+            )
+        )
+        e.process(
+            TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 10L,
-                listOf(pen(0, 200f, 200f, 0L), palm(2, 500f, 700f, 10L)), added = 2,
+                listOf(pen(0, 240f, 220f, 5L), palm(2, 500f, 700f, 10L)), added = 2,
             )
         )
 

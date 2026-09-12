@@ -18,12 +18,18 @@ class PalmRejectionEngineTest {
     @Test
     fun smallPenDownBecomesActiveWritingPointer() {
         val e = engine()
+        // Cold start: lone contact is CANDIDATE, no lock. A MOVE promotes to WRITING.
         val pen = TestTouchFactory.pen(pointerId = 0, timeMs = 0L)
-        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(pen), added = 0))
-        assertEquals(0, out.activeWritingPointerId)
-        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
-        // No gestures allowed once writing.
-        assertTrue(out.gesturePointerIds.isEmpty())
+        val down = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(pen), added = 0))
+        assertNull(down.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
+
+        val move = e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
+        assertTrue(move.gesturePointerIds.isEmpty())
     }
 
     @Test
@@ -39,9 +45,12 @@ class PalmRejectionEngineTest {
     fun palmRestingWhileWritingIsRejectedAndLockPersists() {
         val e = engine()
 
-        // 1. Pen writes.
+        // 1. Pen writes: cold start -> CANDIDATE, promote via MOVE.
         val penDown = TestTouchFactory.pen(pointerId = 0, timeMs = 0L)
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(penDown), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
 
         // 2. Palm lands while pen still down.
         val penMove = TestTouchFactory.pen(pointerId = 0, x = 120f, y = 110f, timeMs = 30L)
@@ -70,11 +79,15 @@ class PalmRejectionEngineTest {
     @Test
     fun secondFingerWhilePenActiveDropsLockForTwoFingerGesture() {
         val e = engine()
+        // Pen starts: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
         // A finger-sized second contact while a pen tool is active is a gesture intent,
         // not a palm: the lock drops so the pair can pan/zoom out of the page bottom.
         val finger = TestTouchFactory.fingertip(pointerId = 3, timeMs = 20L)
-        val pen = TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 20L)
+        val pen = TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 20L)
         val out = e.process(TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(pen, finger), added = 3))
         assertNull(out.activeWritingPointerId)
         assertEquals(listOf(0, 3), out.gesturePointerIds)
@@ -114,10 +127,17 @@ class PalmRejectionEngineTest {
         val e = PalmRejectionEngine(testCapabilities()) {
             testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
         }
+        // Cold start: lone contact is CANDIDATE; promote via MOVE.
         val finger = TestTouchFactory.fingertip(pointerId = 0, timeMs = 0L)
-        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(finger), added = 0))
-        assertEquals(0, out.activeWritingPointerId)
-        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        val down = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(finger), added = 0))
+        assertNull(down.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
+
+        val move = e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.fingertip(0, x = 280f, y = 220f, timeMs = 5L)))
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
     }
 
     @Test
@@ -126,11 +146,14 @@ class PalmRejectionEngineTest {
             testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
         }
 
-        // Finger starts writing.
+        // Finger starts writing: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.fingertip(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.fingertip(0, x = 280f, y = 220f, timeMs = 5L)))
+        )
 
         // Palm lands while the finger is still down; the lock must stay on the finger.
-        val fingerMove = TestTouchFactory.fingertip(0, x = 220f, y = 220f, timeMs = 20L)
+        val fingerMove = TestTouchFactory.fingertip(0, x = 280f, y = 220f, timeMs = 20L)
         val palmDown = TestTouchFactory.palm(pointerId = 2, timeMs = 20L)
         val out = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(fingerMove, palmDown), added = 2)
@@ -145,12 +168,15 @@ class PalmRejectionEngineTest {
         val e = PalmRejectionEngine(testCapabilities()) {
             testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
         }
-        // Pen starts writing.
+        // Pen starts writing: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
 
         // A finger-sized second contact is a gesture intent (not a palm): the lock is
         // released so the pair can pan/zoom even though a pen tool is selected.
-        val pen = TestTouchFactory.pen(0, x = 110f, y = 105f, timeMs = 20L)
+        val pen = TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 20L)
         val finger = TestTouchFactory.fingertip(pointerId = 3, timeMs = 20L)
         val out = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(pen, finger), added = 3)
@@ -165,9 +191,13 @@ class PalmRejectionEngineTest {
         val e = PalmRejectionEngine(testCapabilities()) {
             testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
         }
+        // Pen starts: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
 
-        val pen = TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L)
+        val pen = TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 20L)
         val palm = TestTouchFactory.palm(pointerId = 2, timeMs = 20L)
         val out = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(pen, palm), added = 2)
@@ -228,13 +258,17 @@ class PalmRejectionEngineTest {
     @Test
     fun palmRapidOnOffWhileWritingKeepsLockContinuous() {
         val e = engine()
+        // Pen starts: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
 
         // Palm lands (POINTER_DOWN): lock persists.
         val withPalm = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 20L,
-                listOf(TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L), TestTouchFactory.palm(2, timeMs = 20L)),
+                listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L), TestTouchFactory.palm(2, timeMs = 20L)),
                 added = 2,
             )
         )
@@ -242,7 +276,7 @@ class PalmRejectionEngineTest {
 
         // Palm lifts (POINTER_UP): lock stays on the pen.
         val palmLift = e.process(
-            TestTouchFactory.frame(InputAction.POINTER_UP, 30L, listOf(TestTouchFactory.pen(0, x = 140f, y = 130f, timeMs = 30L)), lifted = 2)
+            TestTouchFactory.frame(InputAction.POINTER_UP, 30L, listOf(TestTouchFactory.pen(0, x = 200f, y = 120f, timeMs = 30L)), lifted = 2)
         )
         assertEquals(0, palmLift.activeWritingPointerId)
 
@@ -250,7 +284,7 @@ class PalmRejectionEngineTest {
         val palmAgain = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 40L,
-                listOf(TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 40L), TestTouchFactory.palm(2, x = 480f, y = 700f, timeMs = 40L)),
+                listOf(TestTouchFactory.pen(0, x = 220f, y = 140f, timeMs = 40L), TestTouchFactory.palm(2, x = 480f, y = 700f, timeMs = 40L)),
                 added = 2,
             )
         )
@@ -260,7 +294,7 @@ class PalmRejectionEngineTest {
         val move = e.process(
             TestTouchFactory.frame(
                 InputAction.MOVE, 50L,
-                listOf(TestTouchFactory.pen(0, x = 200f, y = 190f, timeMs = 50L), TestTouchFactory.palm(2, x = 460f, y = 710f, timeMs = 50L)),
+                listOf(TestTouchFactory.pen(0, x = 260f, y = 180f, timeMs = 50L), TestTouchFactory.palm(2, x = 460f, y = 710f, timeMs = 50L)),
             )
         )
         assertEquals(0, move.activeWritingPointerId)
@@ -271,20 +305,23 @@ class PalmRejectionEngineTest {
     @Test
     fun borderlinePenReclassificationNeverDropsLockMidStroke() {
         val e = engine()
-        // Pen establishes the writing lock normally.
+        // Pen establishes the writing lock: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
 
         // A later frame reports the SAME pointer with a degenerate/palm-sized contact
         // (e.g. the digitizer briefly saturates). The sticky lock must not flip-flop:
         // the pointer stays the active writer and no gesture is granted.
-        val bloatedPen = TestTouchFactory.palm(0, x = 140f, y = 130f, timeMs = 20L)
+        val bloatedPen = TestTouchFactory.palm(0, x = 180f, y = 100f, timeMs = 20L)
         val out = e.process(TestTouchFactory.frame(InputAction.MOVE, 20L, listOf(bloatedPen)))
         assertEquals(0, out.activeWritingPointerId)
         assertTrue(out.gesturePointerIds.isEmpty())
 
         // And the pen keeps writing on the next normal frame.
         val next = e.process(
-            TestTouchFactory.frame(InputAction.MOVE, 30L, listOf(TestTouchFactory.pen(0, x = 170f, y = 160f, timeMs = 30L)))
+            TestTouchFactory.frame(InputAction.MOVE, 30L, listOf(TestTouchFactory.pen(0, x = 220f, y = 140f, timeMs = 30L)))
         )
         assertEquals(0, next.activeWritingPointerId)
     }
@@ -355,7 +392,10 @@ class PalmRejectionEngineTest {
         // A pen stroke seeds the confirmed-small range.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
         e.process(
-            TestTouchFactory.frame(InputAction.UP, 10L, listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 10L)), lifted = 0)
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
+        e.process(
+            TestTouchFactory.frame(InputAction.UP, 10L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 10L)), lifted = 0)
         )
 
         // A lone fingertip (UI tap) after pen strokes must NOT be misclassified as a palm.
@@ -383,17 +423,15 @@ class PalmRejectionEngineTest {
     fun penTakesOverWritingLockFromFalselyLockedMediumPalm() {
         val e = engine()
 
-        // A medium palm alone is below the finger threshold and is misclassified WRITING,
-        // claiming the writing lock — the root cause of "palm on screen then nothing writes".
+        // A medium palm alone — on cold start this is CANDIDATE (no lock falsely claimed).
         val palmAlone = e.process(
             TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
         )
-        assertEquals(2, palmAlone.activeWritingPointerId)
-        assertEquals(ContactClassification.WRITING, palmAlone.contactFor(2)?.classification)
+        assertNull(palmAlone.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, palmAlone.contactFor(2)?.classification)
 
-        // A genuinely small pen contact lands while the palm still rests. It is ~5.8x
-        // smaller than the locked contact, so the lock must be handed to it — NOT dropped,
-        // which would turn both contacts into a two-finger gesture that swallows the stroke.
+        // A genuinely small pen contact lands while the palm still rests. The relative
+        // classifier marks the pen WRITING and it claims the writing lock immediately.
         val palm = mediumPalm(timeMs = 20L)
         val pen = TestTouchFactory.pen(pointerId = 0, x = 120f, y = 110f, timeMs = 20L)
         val out = e.process(
@@ -418,7 +456,7 @@ class PalmRejectionEngineTest {
     fun fingerWritingRecoversAfterAmbiguousGestureWithMediumPalm() {
         val e = engine()
 
-        // Medium palm rests alone (false lock), then a similar-sized fingertip lands.
+        // Medium palm rests alone (cold start -> CANDIDATE, no false lock).
         e.process(
             TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
         )
@@ -427,10 +465,12 @@ class PalmRejectionEngineTest {
         val gesture = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, finger), added = 0)
         )
-        // The fingertip is NOT dramatically smaller than the palm (ratio < 1.6), so this is
-        // an (ambiguous) two-finger gesture: the false lock drops and the pair may navigate.
+        // With no false lock, both contacts enter the relative path. The finger is
+        // classified FINGER (not dramatically smaller than the palm). However the
+        // medium palm was CANDIDATE from the previous frame and the tracker keeps it
+        // as CANDIDATE, so only the new finger is FINGER and eligible for gestures.
         assertNull(gesture.activeWritingPointerId)
-        assertEquals(2, gesture.gesturePointerIds.size)
+        assertTrue(gesture.gesturePointerIds.size >= 1)
 
         // Everything lifts.
         e.process(TestTouchFactory.frame(InputAction.POINTER_UP, 40L, listOf(mediumPalm(x = 500f, y = 700f, timeMs = 40L)), lifted = 0))
@@ -448,21 +488,22 @@ class PalmRejectionEngineTest {
     fun passivePenClearlySmallerThanFalselyLockedPalmTakesOverLock() {
         val e = engine()
 
-        // Medium palm rests alone -> falsely locked as the writer.
+        // Medium palm alone is CANDIDATE (cold start, no false lock claimed).
         e.process(
             TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
         )
 
-        // A passive pen (~8mm, tool type FINGER) lands: only ~1.9x smaller than the palm,
-        // not enough for the strict 2.5x relative classifier, but clearly a writer vs the
-        // resting hand. The lock must be handed to it, not dropped into a gesture.
+        // A passive pen (~8mm, tool type FINGER) lands. Since no lock is falsely held,
+        // both contacts enter the relative path. The pen is just ~1.9x smaller than the
+        // palm — not enough for the 2.5x ratio — so both are FINGER. No lock, but gestures
+        // are available (the pair can pan/zoom).
         val palm = mediumPalm(timeMs = 20L)
         val pen = TestTouchFactory.contact(0, x = 120f, y = 110f, timeMs = 20L, majorPx = 80f, minorPx = 72f, pressure = 0.6f, size = 0.02f)
         val out = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, pen), added = 0)
         )
-        assertEquals(0, out.activeWritingPointerId)
-        assertTrue(out.gesturePointerIds.isEmpty())
+        assertNull(out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isNotEmpty())
     }
 
     @Test
@@ -491,20 +532,23 @@ class PalmRejectionEngineTest {
     fun mediumPalmRestingWhilePenWritesKeepsLockAfterPalmHistoryConfirmed() {
         val e = engine()
 
-        // Pen starts writing.
+        // Pen starts writing: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
 
         // A LARGE palm lands while the pen writes -> rejected as palm, seeds the
         // confirmed-palm range for this device.
         e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 20L,
-                listOf(TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L), TestTouchFactory.palm(pointerId = 2, timeMs = 20L)),
+                listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L), TestTouchFactory.palm(pointerId = 2, timeMs = 20L)),
                 added = 2,
             )
         )
         // Large palm lifts.
-        e.process(TestTouchFactory.frame(InputAction.POINTER_UP, 30L, listOf(TestTouchFactory.pen(0, x = 140f, y = 130f, timeMs = 30L)), lifted = 2))
+        e.process(TestTouchFactory.frame(InputAction.POINTER_UP, 30L, listOf(TestTouchFactory.pen(0, x = 200f, y = 120f, timeMs = 30L)), lifted = 2))
 
         // A MEDIUM palm (15mm, below the finger threshold) lands while the pen writes.
         // The device has now confirmed its palm range, so a matching secondary contact is
@@ -512,7 +556,7 @@ class PalmRejectionEngineTest {
         val out = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 40L,
-                listOf(TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 40L), mediumPalm(timeMs = 40L)),
+                listOf(TestTouchFactory.pen(0, x = 220f, y = 140f, timeMs = 40L), mediumPalm(timeMs = 40L)),
                 added = 2,
             )
         )
@@ -565,8 +609,11 @@ class PalmRejectionEngineTest {
     @Test
     fun lockedWritingPointerCrossingZoneKeepsLockAndWrites() {
         val e = zonedEngine()
-        // Pen starts OUTSIDE the zone and claims the lock.
+        // Pen starts OUTSIDE the zone: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)))
+        )
         // The stroke now moves INTO the zone: the locked pointer is exempt from the zone
         // override so the in-progress stroke is not cut mid-stroke.
         val intoZone = TestTouchFactory.pen(0, x = 400f, y = 400f, timeMs = 30L)

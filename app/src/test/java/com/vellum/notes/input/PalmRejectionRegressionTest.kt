@@ -55,13 +55,20 @@ class PalmRejectionRegressionTest {
     @Test
     fun penWritingPalmJoinsMidStrokeKeepsLock() {
         val e = engine()
+        // Pen starts: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 5L)),
+            )
+        )
 
         val out = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 20L,
                 listOf(
-                    TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L),
+                    TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 5L),
                     TestTouchFactory.palm(2, timeMs = 20L),
                 ),
                 added = 2,
@@ -76,7 +83,7 @@ class PalmRejectionRegressionTest {
             TestTouchFactory.frame(
                 InputAction.MOVE, 40L,
                 listOf(
-                    TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 40L),
+                    TestTouchFactory.pen(0, x = 200f, y = 190f, timeMs = 5L),
                     TestTouchFactory.palm(2, x = 520f, y = 740f, timeMs = 40L),
                 ),
             )
@@ -169,13 +176,14 @@ class PalmRejectionRegressionTest {
     @Test
     fun smallFastTouchWrites() {
         val e = engine()
+        // Cold start: lone contact is CANDIDATE, no lock claimed.
         val down = e.process(
             TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0)
         )
-        assertEquals(0, down.activeWritingPointerId)
-        assertEquals(ContactClassification.WRITING, down.contactFor(0)?.classification)
+        assertNull(down.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
 
-        // Fast stroke motion (80px = 8mm in 10ms): still the writer.
+        // Fast stroke motion (80px = 8mm in 10ms): promotes to WRITING and claims the lock.
         val fast = e.process(
             TestTouchFactory.frame(
                 InputAction.MOVE, 10L,
@@ -246,16 +254,20 @@ class PalmRejectionRegressionTest {
     @Test
     fun pointerIdReuseAfterUpIsFreshTouch() {
         val e = engine()
-        // Pen near the screen edge (inside the 30mm edge margin) lifts, then the SAME
-        // numeric id touches again after the stationary timeout. Stale tracker state
-        // would misread it as a stationary resting finger; a fresh touch must write.
+        // Pen DOWN (cold start -> CANDIDATE), then MOVE enough to promote to WRITING.
         e.process(
             TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 0L)), added = 0)
         )
         e.process(
             TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 100f, timeMs = 5L)),
+            )
+        )
+        e.process(
+            TestTouchFactory.frame(
                 InputAction.UP, 10L,
-                listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 10L)),
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 100f, timeMs = 10L)),
                 lifted = 0,
             )
         )
@@ -300,15 +312,23 @@ class PalmRejectionRegressionTest {
                 listOf(fingertip(1, 150f, 150f, 0L), fingertip(3, 500f, 200f, 10L), fingertip(4, 800f, 250f, 20L)),
             )
         )
-        val fresh = e.process(
+        // After CANCEL the history is reset; the fresh DOWN is CANDIDATE (cold start).
+        // A MOVE with enough travel promotes it to WRITING and claims the lock.
+        e.process(
             TestTouchFactory.frame(
                 InputAction.DOWN, 500L,
                 listOf(TestTouchFactory.pen(1, x = 300f, y = 500f, timeMs = 500L)),
                 added = 1,
             )
         )
-        assertEquals(ContactClassification.WRITING, fresh.contactFor(1)?.classification)
-        assertEquals(1, fresh.activeWritingPointerId)
+        val freshMove = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 510L,
+                listOf(TestTouchFactory.pen(1, x = 400f, y = 500f, timeMs = 510L)),
+            )
+        )
+        assertEquals(1, freshMove.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, freshMove.contactFor(1)?.classification)
     }
 
     // --- Bug: adaptive valid-range must never promote a lone palm to WRITING -------
@@ -324,8 +344,14 @@ class PalmRejectionRegressionTest {
         )
         e.process(
             TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.fingertip(0, x = 400f, y = 500f, timeMs = 5L)),
+            )
+        )
+        e.process(
+            TestTouchFactory.frame(
                 InputAction.UP, 10L,
-                listOf(TestTouchFactory.fingertip(0, x = 300f, y = 500f, timeMs = 10L)),
+                listOf(TestTouchFactory.fingertip(0, x = 400f, y = 500f, timeMs = 10L)),
                 lifted = 0,
             )
         )
@@ -402,12 +428,19 @@ class PalmRejectionRegressionTest {
     @Test
     fun hardwareEraserWhilePenLockedStaysEraser() {
         val e = engine()
+        // Pen starts: cold start -> CANDIDATE, promote via MOVE to claim the lock.
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L)),
+            )
+        )
         val eraser = TestTouchFactory.pen(5, x = 200f, y = 200f, timeMs = 20L, toolType = TestTouchFactory.TOOL_ERASER)
         val out = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 20L,
-                listOf(TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L), eraser),
+                listOf(TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 5L), eraser),
                 added = 5,
             )
         )
@@ -475,6 +508,199 @@ class PalmRejectionRegressionTest {
         }
     }
 
+    // --- Cold-start palm-first-down: CANDIDATE, not WRITING (no ink on palm-first) ---
+
+    @Test
+    fun coldStartPalmFirstDownIsCandidateNotWriting() {
+        val e = engine(PalmRejectionMode.WRITING)
+        // A single small-ellipse contact with empty history must never be WRITING
+        // on the DOWN frame — it is held as CANDIDATE until motion confirms it.
+        val down = e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 200f, timeMs = 0L)), added = 0,
+            )
+        )
+        assertNull("cold-start palm-first must not claim the lock", down.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
+    }
+
+    @Test
+    fun coldStartCandidatePromotesToWritingAfterSufficientMotion() {
+        val e = engine(PalmRejectionMode.WRITING)
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 200f, timeMs = 0L)), added = 0,
+            )
+        )
+        // Move enough (>=40px=4mm) to pass the stroke gate and promote to WRITING.
+        val move = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 10L,
+                listOf(TestTouchFactory.pen(0, x = 280f, y = 220f, timeMs = 10L)),
+            )
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
+        assertTrue(move.gesturePointerIds.isEmpty())
+    }
+
+    // --- Mid-stroke palm join: ink must stay correct --------------------------------
+
+    @Test
+    fun midStrokePalmJoinKeepsWritingCorrect() {
+        val e = engine(PalmRejectionMode.WRITING)
+        // Pen starts and is promoted to writing.
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 200f, timeMs = 0L)), added = 0,
+            )
+        )
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.pen(0, x = 280f, y = 220f, timeMs = 5L)),
+            )
+        )
+        // Palm lands mid-stroke: pen stays the writer, palm is rejected.
+        val palmJoins = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(
+                    TestTouchFactory.pen(0, x = 280f, y = 220f, timeMs = 5L),
+                    TestTouchFactory.palm(2, x = 500f, y = 700f, timeMs = 20L),
+                ),
+                added = 2,
+            )
+        )
+        assertEquals("pen must keep the lock", 0, palmJoins.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, palmJoins.contactFor(0)?.classification)
+        assertEquals(ContactClassification.PALM, palmJoins.contactFor(2)?.classification)
+        assertTrue(palmJoins.gesturePointerIds.isEmpty())
+
+        // Continuing stroke with palm still resting.
+        val cont = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 30L,
+                listOf(
+                    TestTouchFactory.pen(0, x = 320f, y = 260f, timeMs = 30L),
+                    TestTouchFactory.palm(2, x = 500f, y = 700f, timeMs = 20L),
+                ),
+            )
+        )
+        assertEquals(0, cont.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, cont.contactFor(0)?.classification)
+    }
+
+    // --- No-palm single stroke: writing without palm still works ---------------------
+
+    @Test
+    fun noPalmSingleStrokeWritesCorrectly() {
+        val e = engine(PalmRejectionMode.WRITING)
+        // Cold start -> CANDIDATE, promote via MOVE.
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 200f, timeMs = 0L)), added = 0,
+            )
+        )
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.pen(0, x = 280f, y = 220f, timeMs = 5L)),
+            )
+        )
+        // Pen is writing, no palm present.
+        val move = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 15L,
+                listOf(TestTouchFactory.pen(0, x = 360f, y = 240f, timeMs = 15L)),
+            )
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
+        // Clean up.
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.UP, 25L,
+                listOf(TestTouchFactory.pen(0, x = 400f, y = 260f, timeMs = 25L)),
+                lifted = 0,
+            )
+        )
+    }
+
+    // --- Continued writing after palm lift: ink stays correct ------------------------
+
+    @Test
+    fun continuedWritingAfterPalmLift() {
+        val e = engine(PalmRejectionMode.WRITING)
+        // Pen starts writing.
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 200f, timeMs = 0L)), added = 0,
+            )
+        )
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L,
+                listOf(TestTouchFactory.pen(0, x = 280f, y = 220f, timeMs = 5L)),
+            )
+        )
+        // Palm joins.
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(
+                    TestTouchFactory.pen(0, x = 280f, y = 220f, timeMs = 5L),
+                    TestTouchFactory.palm(2, x = 500f, y = 700f, timeMs = 20L),
+                ),
+                added = 2,
+            )
+        )
+        // Palm lifts while pen still writing.
+        val palmLift = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_UP, 30L,
+                listOf(TestTouchFactory.pen(0, x = 320f, y = 250f, timeMs = 30L)),
+                lifted = 2,
+            )
+        )
+        assertEquals("pen must keep the lock after palm lifts", 0, palmLift.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, palmLift.contactFor(0)?.classification)
+
+        // Writing continues after palm is gone.
+        val cont = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 40L,
+                listOf(TestTouchFactory.pen(0, x = 400f, y = 280f, timeMs = 40L)),
+            )
+        )
+        assertEquals(0, cont.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, cont.contactFor(0)?.classification)
+        assertTrue(cont.gesturePointerIds.isEmpty())
+    }
+
+    // --- Palm rejection disabled: no behavior change (regression guard) -------------
+
+    @Test
+    fun palmRejectionDisabledBehaviorUnchanged() {
+        val e = PalmRejectionEngine(testCapabilities()) {
+            testSettings().apply { palmRejectionEnabled = false }
+        }
+        // With palm rejection off, every contact writes — cold start has no effect.
+        val down = e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 200f, timeMs = 0L)), added = 0,
+            )
+        )
+        assertEquals(ContactClassification.WRITING, down.contactFor(0)?.classification)
+        assertEquals(0, down.activeWritingPointerId)
+    }
+
     // --- (i) palm resting, then finger writes: no dead window -------------------
 
     @Test
@@ -485,9 +711,9 @@ class PalmRejectionRegressionTest {
         )
         assertNull(palmFirst.activeWritingPointerId)
 
-        // Fingertip joins while the palm rests: it must claim the lock on the DOWN
-        // frame itself — previously it waited for tracker promotion and the user
-        // wrote with no ink appearing.
+        // Fingertip joins while the palm rests: it must claim the lock on the POINTER_DOWN
+        // frame — the relative classifier marks it WRITING (the smallest contact beside a
+        // palm-sized contact).
         val out = e.process(
             TestTouchFactory.frame(
                 InputAction.POINTER_DOWN, 20L,
@@ -523,6 +749,8 @@ class PalmRejectionRegressionTest {
             )
         )
         assertNull(out.activeWritingPointerId)
-        assertTrue(out.gesturePointerIds.containsAll(listOf(1, 3)))
+        // After cold start, the first finger is CANDIDATE (not yet promoted); only
+        // the second finger is FINGER and may gesture. The lock remains unclaimed.
+        assertTrue(out.gesturePointerIds.contains(3))
     }
 }

@@ -36,13 +36,19 @@ class PalmAuditTest {
     fun fingerWriter_firstPalmSecond_keepsDrawing() {
         val e = engine()
 
-        val down = e.process(
+        // Cold start: lone contact is CANDIDATE; promote via MOVE.
+        e.process(
             TestTouchFactory.frame(
                 InputAction.DOWN, 0L, listOf(fingertip(1, 300f, 400f, 0L)), added = 1,
             )
         )
-        assertEquals(ContactClassification.WRITING, down.contactFor(1)?.classification)
-        assertEquals(1, down.activeWritingPointerId)
+        val promote = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 5L, listOf(fingertip(1, 380f, 420f, 5L)),
+            )
+        )
+        assertEquals(ContactClassification.WRITING, promote.contactFor(1)?.classification)
+        assertEquals(1, promote.activeWritingPointerId)
 
         val palmJoins = e.process(
             TestTouchFactory.frame(

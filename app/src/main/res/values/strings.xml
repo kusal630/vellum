@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Vellum</string>
+
+    <!-- SCOUT-05: mic / notification rationale. Shown in-app BEFORE the system
+         permission prompt so the classroom-recording justification is explicit. -->
+    <string name="mic_rationale_title">Allow microphone for classroom recording?</string>
+    <string name="mic_rationale_text">Vellum uses the microphone only when you tap record in a classroom notebook, to transcribe the lesson live with on-device speech recognition. Audio is processed on this device and never uploaded. You can deny and keep writing notes normally.</string>
+    <string name="mic_rationale_allow">Continue</string>
+    <string name="mic_rationale_dismiss">Not now</string>
+    <string name="notification_rationale_title">Show recording notification?</string>
+    <string name="notification_rationale_text">While classroom recording runs, Vellum shows a persistent notification so you always know the microphone is active, with a Stop action. Allow notifications on Android 13 and above to keep this visible.</string>
+    <string name="notification_rationale_allow">Continue</string>
+    <string name="notification_rationale_dismiss">Not now</string>
+    <string name="mic_permission_denied">Microphone permission denied — classroom recording is unavailable. You can still write notes normally.</string>
+
+    <!-- Foreground-service recording notification (AudioCaptureService). -->
+    <string name="recording_notification_title">Classroom Notes recording</string>
+    <string name="recording_notification_text">Transcribing on-device…</string>
+    <string name="recording_notification_stop">Stop</string>
+    <string name="recording_channel_name">Classroom recording</string>
 </resources>

@@ -10,6 +10,13 @@
     <!-- Persistent recording notification on Android 13+. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Microphone is optional: classroom recording is one feature, the app works
+         fully without it. required=false keeps Play from filtering out devices
+         without a mic and documents the permission as non-core. -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
     <application
         android:name=".VellumApp"
         android:allowBackup="false"

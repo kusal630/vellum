@@ -1,7 +1,7 @@
 # Vellum release ProGuard / R8 rules.
-# Referenced by the release build type in app/build.gradle.kts. Currently
-# isMinifyEnabled = false, so these are dormant — they take effect as soon
-# as minification is enabled, and F-Droid applies them on its builders.
+# Referenced by the release build type in app/build.gradle.kts, where
+# isMinifyEnabled = true (with isShrinkResources = true), so these are active
+# on release builds; F-Droid applies them on its builders.
 
 # --- Generic: keep annotations/signatures R8 needs for reflection-based libs ---
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
@@ -30,12 +30,24 @@
 }
 
 # --- Jetpack Compose / Material3 ---
-# Composable functions are referenced by the compiler-generated state machinery.
--keep class androidx.compose.** { *; }
--keepclassmembers class androidx.compose.** { *; }
--dontwarn androidx.compose.**
-# Keep remember/saveable state and navigation route classes in app code.
--keep class com.vellum.notes.ui.** { *; }
+# Compose compiler + AGP already emit the keeps Composables need; no blanket
+# androidx.compose keep is required. Keep only true entry points referenced via
+# reflection: @Keep markers, Parcelable/Serializable types used with
+# rememberSaveable or navigation arguments, and custom Saver implementations.
+-keep @androidx.annotation.Keep class *
+-keepclassmembers @androidx.annotation.Keep class * { *; }
+-keepclasseswithmembers class * implements android.os.Parcelable {
+    public static final android.os.Parcelable$Creator *;
+}
+-keepclasseswithmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}
+-keep class * implements androidx.compose.runtime.saveable.Saver { *; }
 
 # --- kotlinx.serialization (plugin-managed serializers + JSON runtime) ---
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault
@@ -49,4 +61,7 @@
 -dontwarn kotlinx.coroutines.**
 -dontwarn androidx.datastore.**
 -dontwarn androidx.work.**
--keep class androidx.datastore.** { *; }
+# Preferences DataStore (used via preferencesDataStore delegate) needs no blanket
+# keep. Keep only a custom Proto DataStore Serializer implementation, should one
+# be added later (standard DataStore guidance).
+-keep class * extends androidx.datastore.core.Serializer { *; }

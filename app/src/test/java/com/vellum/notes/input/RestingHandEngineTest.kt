@@ -156,9 +156,11 @@ class RestingHandEngineTest {
     fun lockedWriterCancelledOnSustainedPalmGrowth() {
         val e = engine()
 
-        // Pen starts a stroke (small contact).
+        // Pen starts a stroke (cold start -> CANDIDATE, promote via MOVE).
         e.process(TestTouchFactory.frame(
             InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L))))
 
         // Its contact grows to palm size and STAYS there. The smoothed size takes several
         // frames to cross the hysteresis threshold; once it does, the lock is cancelled
@@ -167,9 +169,10 @@ class RestingHandEngineTest {
         var cancelled = false
         var i = 1
         while (i <= 15) {
+            val t = 10L + 10L * i
             out = e.process(TestTouchFactory.frame(
-                InputAction.MOVE, (10L * i),
-                listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 0L, majorPx = 300f, minorPx = 260f)),
+                InputAction.MOVE, t,
+                listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 5L, majorPx = 300f, minorPx = 260f)),
             ))
             if (out.activeWritingPointerId == null) {
                 cancelled = true
@@ -187,14 +190,16 @@ class RestingHandEngineTest {
     fun singleSizeSpikeNeverCancelsLockedWriter() {
         val e = engine()
 
-        // Pen starts a stroke.
+        // Pen starts a stroke: cold start -> CANDIDATE, promote via MOVE.
         e.process(TestTouchFactory.frame(
             InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 5L, listOf(TestTouchFactory.pen(0, x = 180f, y = 100f, timeMs = 5L))))
 
         // One frame reports an absurd palm-sized contact (digitizer spike).
         val spike = e.process(TestTouchFactory.frame(
             InputAction.MOVE, 10L,
-            listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 0L, majorPx = 400f, minorPx = 380f)),
+            listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 5L, majorPx = 400f, minorPx = 380f)),
         ))
         assertEquals(0, spike.activeWritingPointerId)
 
@@ -426,12 +431,19 @@ class RestingHandEngineTest {
         assertEquals(ContactClassification.WRITING, promoted.contactFor(0)?.classification)
         assertEquals(0, promoted.activeWritingPointerId)
 
-        // Control: with the default (true) the same lone contact writes immediately.
+        // Control: with the default (true) the same lone contact is CANDIDATE
+        // on cold start (cold-start CANDIDATE replaces old immediate WRITING).
         val immediate = engine()
         val downDefault = immediate.process(TestTouchFactory.frame(
             InputAction.DOWN, 0L, listOf(writer(0, 100f, 100f, 0L)), added = 0))
-        assertEquals(ContactClassification.WRITING, downDefault.contactFor(0)?.classification)
-        assertEquals(0, downDefault.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, downDefault.contactFor(0)?.classification)
+        assertNull(downDefault.activeWritingPointerId)
+
+        // After promotion via MOVE it becomes WRITING.
+        val promotedDefault = immediate.process(TestTouchFactory.frame(
+            InputAction.MOVE, 10L, listOf(writer(0, 180f, 100f, 0L))))
+        assertEquals(ContactClassification.WRITING, promotedDefault.contactFor(0)?.classification)
+        assertEquals(0, promotedDefault.activeWritingPointerId)
     }
 
     @Test

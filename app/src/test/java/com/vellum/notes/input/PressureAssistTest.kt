@@ -105,7 +105,8 @@ class PressureAssistTest {
         // Below the writing band (and the suspicious size): pressure is irrelevant.
         val pen = TestTouchFactory.pen().copy(pressure = 1.0f)
         val r = classify(pen)
-        assertEquals(ContactClassification.WRITING, r.classification)
+        // Cold start: a small contact is CANDIDATE even with saturated pressure
+        assertEquals(ContactClassification.CANDIDATE, r.classification)
     }
 
     @Test
