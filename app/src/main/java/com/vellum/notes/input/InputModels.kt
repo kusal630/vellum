@@ -215,7 +215,10 @@ internal data class PointerMotionState(
     /** Distance travelled between the two most recent samples (screen px). */
     var lastFrameDistPx: Float = 0f,
     /** Time of the last sample that moved more than the jitter dead-zone (nanos). */
-    var lastMoveTimeNanos: Long = downTimeNanos,
+    // SENT-M3: -1L until the first above-jitter movement is observed. A 0L default
+    // made the first stationary delta enormous (now - 0), instantly aging fresh
+    // contacts into RESTING. Readers map the sentinel to down time (just landed).
+    var lastMoveTimeNanos: Long = -1L,
     /** Contact size (maxDimMm) reported when this pointer first went down. */
     var initialContactSizeMm: Float = 0f,
     /** Exponential-moving-average of the contact size (mm); resists single-frame spikes. */

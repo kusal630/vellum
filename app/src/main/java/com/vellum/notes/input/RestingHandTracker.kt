@@ -94,6 +94,10 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
 
         // --- 1. Update per-pointer motion + contact-size state. ------------------------
         val presentIds = HashSet<Int>(baseClassified.size)
+        // SENT-M3: explicit try-finally closes the isNew window — a pointer is new
+        // for exactly the frame that first saw it, never leaking true past it even
+        // if classification throws mid-frame.
+        try {
         for (c in baseClassified) {
             val id = c.contact.pointerId
             presentIds += id
@@ -176,8 +180,12 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
             return x <= leftMargin || x >= widthPx - rightMargin
         }
 
-        fun stationaryMs(st: PointerMotionState): Long =
-            ((nowNanos - st.lastMoveTimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        fun stationaryMs(st: PointerMotionState): Long {
+            // SENT-M3: -1L means "no movement observed yet" — treat as just landed
+            // so the first delta is ~0 instead of enormous (now - 0L).
+            val lastMove = if (st.lastMoveTimeNanos < 0L) st.downTimeNanos else st.lastMoveTimeNanos
+            return ((nowNanos - lastMove) / 1_000_000L).coerceAtLeast(0L)
+        }
 
         /** The adaptive stroke gate: resting-hand noise forces a higher minimum velocity. */
         fun effectivePromoteVelocity(): Float =
@@ -598,10 +606,11 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
             )
         }
 
-        // The next frame must see this pointer as established, not "new".
-        for (id in presentIds) pointerStates[id]?.isNew = false
-
         return Result(adjusted, promoteId, cancelId, clusterBounds)
+        } finally {
+            // The next frame must see this pointer as established, not "new".
+            for (id in presentIds) pointerStates[id]?.isNew = false
+        }
     }
 
     /** How much the contact looks like a deliberate stroke (0..1), for diagnostics. */
