@@ -7,6 +7,12 @@ import com.vellum.notes.data.SyncRepository
 import com.vellum.notes.data.createRepository
 import com.vellum.notes.data.settingsDataStore
 import com.vellum.notes.data.syncDataStore
+import com.vellum.notes.packs.FakePackBilling
+import com.vellum.notes.packs.PackBilling
+import com.vellum.notes.packs.PackRepository
+import com.vellum.notes.packs.PackUnlocker
+import com.vellum.notes.packs.PlayBillingV7
+import com.vellum.notes.packs.packsDataStore
 import com.vellum.notes.input.PalmRejectionEngine
 import com.vellum.notes.input.InputCapabilities
 import com.vellum.notes.input.PalmRejectionSettings
@@ -25,6 +31,18 @@ class AppContainer(private val application: Application) {
     private val dataStore = application.settingsDataStore()
     val settingsRepository = SettingsRepository(dataStore)
     val syncRepository = SyncRepository(application.syncDataStore())
+
+    /** Revenue packs: offline-first entitlements + pack data (DataStore JSON). */
+    val packRepository = PackRepository(application.packsDataStore())
+    val packBilling: PackBilling by lazy {
+        // Reflection-based Play Billing v7; degrades to unavailable (license
+        // path) on F-Droid/offline builds with no billing artifact.
+        runCatching { PlayBillingV7(application) }.getOrNull()
+            ?: FakePackBilling(owned = emptySet(), isAvailable = false)
+    }
+    val packUnlocker: PackUnlocker by lazy {
+        PackUnlocker(packRepository, packBilling)
+    }
 
     /** Latest persisted settings, cached for synchronous reads by the input engine. */
     @Volatile

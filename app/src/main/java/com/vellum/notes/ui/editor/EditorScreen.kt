@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
@@ -93,6 +94,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -239,6 +241,74 @@ fun EditorScreen(
     val uiContext = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // --- Revenue packs (MUSE-R1): offline entitlements drive all gates. ---
+    val packRepository = remember { app.container.packRepository }
+    val packUnlocker = remember { app.container.packUnlocker }
+    val packBilling = remember { app.container.packBilling }
+    val entitlements by packRepository.entitlements.collectAsState(
+        initial = com.vellum.notes.packs.PackEntitlements(),
+    )
+    val classroomUnlocked = entitlements.isUnlocked(com.vellum.notes.packs.PackId.CLASSROOM)
+    val pdfUnlocked = entitlements.isUnlocked(com.vellum.notes.packs.PackId.PDF)
+    val gestureUnlocked = entitlements.isUnlocked(com.vellum.notes.packs.PackId.GESTURE)
+    var unlockPack by remember { mutableStateOf<com.vellum.notes.packs.PackId?>(null) }
+    var unlockMessage by remember { mutableStateOf<String?>(null) }
+    var showPageManager by remember { mutableStateOf(false) }
+    var showLayeredExport by remember { mutableStateOf(false) }
+    var showGestureMapping by remember { mutableStateOf(false) }
+    var showBookmarksPanel by remember { mutableStateOf(false) }
+    val licensePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    uiContext.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().toString(Charsets.UTF_8)
+                    }
+                }.getOrNull()
+            }
+            if (text == null) {
+                unlockMessage = "Could not read that license file."
+            } else {
+                val unlocked = packUnlocker.importLicenseText(text)
+                unlockMessage = if (unlocked.isEmpty()) "Invalid license file."
+                else "Unlocked: ${unlocked.joinToString { it.title }}"
+            }
+        }
+    }
+    unlockPack?.let { pack ->
+        com.vellum.notes.packs.ui.PackUnlockDialog(
+            pack = pack,
+            purchaseAvailable = packBilling.isAvailable,
+            restoreMessage = null,
+            licenseMessage = unlockMessage,
+            onRestorePurchases = {
+                scope.launch {
+                    val owned = packUnlocker.restorePurchases()
+                    unlockMessage = if (owned.isEmpty()) "No purchases found."
+                    else "Restored: ${owned.joinToString { it.title }}"
+                }
+            },
+            onImportLicense = { licensePicker.launch(arrayOf("*/*")) },
+            onBuyPack = {
+                scope.launch {
+                    val activity = uiContext as? android.app.Activity
+                    if (activity != null) {
+                        packBilling.launchPurchase(activity, pack)
+                        val owned = packUnlocker.restorePurchases()
+                        unlockMessage = if (owned.isEmpty()) "Purchase unavailable — use Import License."
+                        else "Restored: ${owned.joinToString { it.title }}"
+                    } else {
+                        unlockMessage = "Purchase unavailable — use Import License."
+                    }
+                }
+            },
+            onDismiss = { unlockPack = null; unlockMessage = null },
+        )
+    }
+
     // Pages load asynchronously; null until the real list arrives so we never create a
     // duplicate page from the initial placeholder emission.
     var pages by remember { mutableStateOf<List<PageSummary>?>(null) }
@@ -326,6 +396,37 @@ fun EditorScreen(
     val classroomAvailable = remember(uiContext) { ModelDiscovery.resolve(uiContext) != null }
     var classroomNotice by remember { mutableStateOf<String?>(null) }
     var summaryGenerating by remember { mutableStateOf(false) }
+
+    // --- Classroom Pack: chapters + audio-sync position + auto-backup. ---
+    var chapters by remember(pageId) { mutableStateOf<List<com.vellum.notes.packs.Chapter>>(emptyList()) }
+    LaunchedEffect(pageId) {
+        chapters = packRepository.getChapters(pageId)
+    }
+    var playbackMs by remember { mutableStateOf(0L) }
+    val autoBackup by packRepository.autoBackupEnabled.collectAsState(initial = false)
+
+    // --- Gesture/Bookmark Pack: bookmarks + custom gesture mapping. ---
+    var bookmarks by remember(notebookId) {
+        mutableStateOf<List<com.vellum.notes.packs.PageBookmark>>(emptyList())
+    }
+    LaunchedEffect(notebookId, showRail, showBookmarksPanel) {
+        bookmarks = packRepository.getBookmarks(notebookId)
+    }
+    var gestureMapping by remember {
+        mutableStateOf<List<com.vellum.notes.packs.GestureMapping>>(
+            com.vellum.notes.packs.GesturePro.defaultMapping(),
+        )
+    }
+    LaunchedEffect(Unit) {
+        gestureMapping = packRepository.getGestureMapping()
+    }
+    // Custom gesture: two-finger double-tap already undoes via canvas listener;
+    // honor a remapped action when the pack is unlocked.
+    val gestureActionForDoubleTap =
+        com.vellum.notes.packs.GesturePro.resolveAction(
+            com.vellum.notes.packs.GesturePro.GESTURE_TWO_FINGER_DOUBLE_TAP,
+            gestureMapping,
+        )
 
     // Mirror every recognized segment into the page content while this page owns the
     // transcript — while recording AND after stop (recordingPageId survives the stop) —
@@ -652,6 +753,92 @@ fun EditorScreen(
                 }
             }
         }
+        // PDF Power Tools: layered export honors the selected layers. The text
+        // layer is the drawn text objects (selectable in viewers); filtering
+        // drops unselected layers before export. No new deps.
+        val onExportLayered: (com.vellum.notes.packs.LayeredExportOptions) -> Unit = { options ->
+            scope.launch {
+                val filtered = content.copy(
+                    strokes = if (options.includeInk) content.strokes else emptyList(),
+                    shapeObjects = if (options.includeShapes) content.shapeObjects else emptyList(),
+                    imageObjects = if (options.includeImages) content.imageObjects else emptyList(),
+                    textObjects = if (options.includeTextLayer) content.textObjects else emptyList(),
+                )
+                val bg = if (options.includeBackground) pageBackground
+                else com.vellum.notes.model.PageBackground()
+                val file = withContext(Dispatchers.IO) {
+                    PdfExporter.export(uiContext, pageId, filtered, bg)
+                }
+                if (file != null) {
+                    val uri = FileProvider.getUriForFile(
+                        uiContext,
+                        "${uiContext.packageName}.fileprovider",
+                        file,
+                    )
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/pdf"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    uiContext.startActivity(Intent.createChooser(send, "Export PDF (layered)"))
+                } else {
+                    Toast.makeText(uiContext, "PDF export failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        // Pack dialog hosts (page manager / layered export / gesture mapping).
+        if (showPageManager) {
+            com.vellum.notes.packs.ui.PageManagerDialog(
+                pages = pageList,
+                onMove = { id, newOrder ->
+                    scope.launch { repository.reorderPage(id, newOrder) }
+                },
+                onInsert = { scope.launch { repository.createPage(notebookId) } },
+                onDuplicate = { id ->
+                    scope.launch {
+                        val newId = repository.duplicatePage(id)
+                        selectedPageId = newId
+                    }
+                },
+                onDelete = { id ->
+                    scope.launch {
+                        repository.deletePage(id)
+                        if (id == selectedPageId) selectedPageId = null
+                    }
+                },
+                onDismiss = { showPageManager = false },
+            )
+        }
+        if (showLayeredExport) {
+            com.vellum.notes.packs.ui.LayeredExportDialog(
+                initial = com.vellum.notes.packs.LayeredExportOptions(),
+                onExport = { options ->
+                    showLayeredExport = false
+                    onExportLayered(options)
+                },
+                onDismiss = { showLayeredExport = false },
+            )
+        }
+        if (showGestureMapping) {
+            com.vellum.notes.packs.ui.GestureMappingDialog(
+                mapping = gestureMapping,
+                onSave = { mapping ->
+                    gestureMapping = mapping
+                    scope.launch { packRepository.setGestureMapping(mapping) }
+                    showGestureMapping = false
+                },
+                onReset = {
+                    scope.launch {
+                        packRepository.setGestureMapping(
+                            com.vellum.notes.packs.GesturePro.defaultMapping(),
+                        )
+                        gestureMapping = com.vellum.notes.packs.GesturePro.defaultMapping()
+                    }
+                    showGestureMapping = false
+                },
+                onDismiss = { showGestureMapping = false },
+            )
+        }
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
@@ -778,6 +965,32 @@ fun EditorScreen(
                         val newId = vm.convertSelectionToText()
                         if (newId != 0L) editingTextId = newId
                     },
+                    classroomUnlocked = classroomUnlocked,
+                    pdfUnlocked = pdfUnlocked,
+                    gestureUnlocked = gestureUnlocked,
+                    onOpenClassroomExport = {
+                        if (classroomUnlocked) showTranscriptSidebar = true
+                        else unlockPack = com.vellum.notes.packs.PackId.CLASSROOM
+                    },
+                    onOpenPageManager = {
+                        if (pdfUnlocked) showPageManager = true
+                        else unlockPack = com.vellum.notes.packs.PackId.PDF
+                    },
+                    onOpenLayeredExport = {
+                        if (pdfUnlocked) showLayeredExport = true
+                        else unlockPack = com.vellum.notes.packs.PackId.PDF
+                    },
+                    onOpenBookmarks = {
+                        if (gestureUnlocked) {
+                            showRail = true
+                            showBookmarksPanel = true
+                        } else unlockPack = com.vellum.notes.packs.PackId.GESTURE
+                    },
+                    onOpenGestureMapping = {
+                        if (gestureUnlocked) showGestureMapping = true
+                        else unlockPack = com.vellum.notes.packs.PackId.GESTURE
+                    },
+                    onLockedPack = { unlockPack = it },
                 )
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Canvas fills the whole screen so you can write edge to edge; the page
@@ -977,6 +1190,35 @@ fun EditorScreen(
                                 }
                             }
                         },
+                        classroomUnlocked = classroomUnlocked,
+                        chapters = chapters,
+                        playbackMs = playbackMs,
+                        autoBackupEnabled = autoBackup,
+                        onSeekPlayback = { playbackMs = it },
+                        onGenerateChapters = {
+                            scope.launch {
+                                val generated =
+                                    com.vellum.notes.packs.ClassroomPro.autoChapters(transcript)
+                                chapters = generated
+                                packRepository.setChapters(pageId, generated)
+                            }
+                        },
+                        onSeekChapter = { chapter -> playbackMs = chapter.startMs },
+                        onToggleAutoBackup = { enabled ->
+                            scope.launch { packRepository.setAutoBackup(enabled) }
+                        },
+                        onShareExport = {
+                            val text = com.vellum.notes.packs.ClassroomPro.exportText(
+                                transcript, chapters, content.summary,
+                                pageList.firstOrNull { it.id == pageId }?.title ?: "Page",
+                            )
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, text)
+                            }
+                            uiContext.startActivity(Intent.createChooser(send, "Export classroom"))
+                        },
+                        onLockedPack = { unlockPack = it },
                         modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).fillMaxHeight(),
                     )
                 }
@@ -989,7 +1231,7 @@ fun EditorScreen(
                         currentPageId = pageId,
                         compact = compact,
                         modifier = Modifier
-                            .width(if (compact) 72.dp else 150.dp)
+                            .width(if (compact) 180.dp else 220.dp)
                             .fillMaxHeight(),
                         onSelectPage = { id -> selectedPageId = id },
                         onNewPage = { scope.launch { repository.createPage(notebookId) } },
@@ -1006,6 +1248,37 @@ fun EditorScreen(
                             }
                         },
                         onHistoryPage = { id -> historyPageId = id },
+                        pdfUnlocked = pdfUnlocked,
+                        gestureUnlocked = gestureUnlocked,
+                        bookmarks = bookmarks,
+                        showBookmarks = showBookmarksPanel || gestureUnlocked,
+                        onOpenPageManager = {
+                            if (pdfUnlocked) showPageManager = true
+                            else unlockPack = com.vellum.notes.packs.PackId.PDF
+                        },
+                        onJumpBookmark = { id -> selectedPageId = id },
+                        onAddBookmark = {
+                            scope.launch {
+                                val title = pageList.firstOrNull { it.id == pageId }?.title
+                                    ?: "Page"
+                                packRepository.addBookmark(
+                                    notebookId,
+                                    com.vellum.notes.packs.PageBookmark(pageId, title),
+                                )
+                                bookmarks = packRepository.getBookmarks(notebookId)
+                            }
+                        },
+                        onRemoveBookmark = { bid ->
+                            scope.launch {
+                                packRepository.removeBookmark(notebookId, bid)
+                                bookmarks = packRepository.getBookmarks(notebookId)
+                            }
+                        },
+                        onLockedPack = { unlockPack = it },
+                        onOpenGestureMapping = {
+                            if (gestureUnlocked) showGestureMapping = true
+                            else unlockPack = com.vellum.notes.packs.PackId.GESTURE
+                        },
                     )
                     HorizontalDivider(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
@@ -1025,6 +1298,10 @@ fun EditorScreen(
  *
  * - Transcript: live (or saved) recognized speech; auto-scrolls while recording.
  * - Summary: an on-device extractive summary of the transcript, generated on request.
+ * - Chapters (Classroom Pack): auto-chapters + audio-sync playback position.
+ * - Export (Classroom Pack): chapter + transcript export + auto-backup toggle.
+ *
+ * Locked pack tabs render at 38% alpha; tapping them opens the unlock dialog.
  */
 @Composable
 private fun ClassroomSidebar(
@@ -1038,6 +1315,16 @@ private fun ClassroomSidebar(
     summaryGenerating: Boolean = false,
     onGenerateSummary: () -> Unit,
     modifier: Modifier = Modifier,
+    classroomUnlocked: Boolean = false,
+    chapters: List<com.vellum.notes.packs.Chapter> = emptyList(),
+    playbackMs: Long = 0L,
+    autoBackupEnabled: Boolean = false,
+    onSeekPlayback: (Long) -> Unit = {},
+    onGenerateChapters: () -> Unit = {},
+    onSeekChapter: (com.vellum.notes.packs.Chapter) -> Unit = {},
+    onToggleAutoBackup: (Boolean) -> Unit = {},
+    onShareExport: () -> Unit = {},
+    onLockedPack: (com.vellum.notes.packs.PackId) -> Unit = {},
 ) {
     var tab by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
@@ -1087,10 +1374,33 @@ private fun ClassroomSidebar(
             }
             Spacer(Modifier.height(8.dp))
 
-            // Tabs: Transcript | Summary — extensible surface for future features.
+            // Tabs: Transcript | Summary | Chapters (pack) | Export (pack).
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SidebarTab(label = "Transcript", selected = tab == 0, onClick = { tab = 0 }, modifier = Modifier.weight(1f))
                 SidebarTab(label = "Summary", selected = tab == 1, onClick = { tab = 1 }, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                PackSidebarTab(
+                    label = "Chapters",
+                    selected = tab == 2,
+                    unlocked = classroomUnlocked,
+                    onClick = {
+                        if (classroomUnlocked) tab = 2
+                        else onLockedPack(com.vellum.notes.packs.PackId.CLASSROOM)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                PackSidebarTab(
+                    label = "Export",
+                    selected = tab == 3,
+                    unlocked = classroomUnlocked,
+                    onClick = {
+                        if (classroomUnlocked) tab = 3
+                        else onLockedPack(com.vellum.notes.packs.PackId.CLASSROOM)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
             }
             Spacer(Modifier.height(8.dp))
 
@@ -1190,6 +1500,65 @@ private fun ClassroomSidebar(
                         Text(if (summaryGenerating) "Generating…" else if (summary != null) "Regenerate summary" else "Generate summary")
                     }
                 }
+                2 -> {
+                    // Chapters tab is pack-gated; locked taps never reach here
+                    // (they open the unlock dialog), but guard anyway.
+                    if (!classroomUnlocked) {
+                        LockedPackNote(
+                            pack = com.vellum.notes.packs.PackId.CLASSROOM,
+                            onUnlock = { onLockedPack(com.vellum.notes.packs.PackId.CLASSROOM) },
+                        )
+                    } else {
+                        com.vellum.notes.packs.ui.AudioSyncBar(
+                            segments = segments,
+                            positionMs = playbackMs,
+                            onSeek = onSeekPlayback,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        com.vellum.notes.packs.ui.ChaptersTab(
+                            segments = segments,
+                            chapters = chapters,
+                            onGenerate = onGenerateChapters,
+                            onSeek = onSeekChapter,
+                        )
+                    }
+                }
+                3 -> {
+                    if (!classroomUnlocked) {
+                        LockedPackNote(
+                            pack = com.vellum.notes.packs.PackId.CLASSROOM,
+                            onUnlock = { onLockedPack(com.vellum.notes.packs.PackId.CLASSROOM) },
+                        )
+                    } else {
+                        val exportText = remember(segments, chapters, summary) {
+                            com.vellum.notes.packs.ClassroomPro.exportText(
+                                segments, chapters, summary, "Classroom note",
+                            )
+                        }
+                        com.vellum.notes.packs.ui.ClassroomExportPanel(
+                            exportText = exportText.ifBlank { "Nothing to export yet." },
+                            onShare = onShareExport,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Auto-backup",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    "Scheduled local backup of classroom notes.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            androidx.compose.material3.Switch(
+                                checked = autoBackupEnabled,
+                                onCheckedChange = onToggleAutoBackup,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1221,6 +1590,77 @@ private fun SidebarTab(label: String, selected: Boolean, onClick: () -> Unit, mo
             color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun PackSidebarTab(
+    label: String,
+    selected: Boolean,
+    unlocked: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surface
+            )
+            .then(
+                if (unlocked) Modifier
+                else Modifier.alpha(com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA),
+            )
+            .semantics {
+                contentDescription = "$label tab ${if (unlocked) "unlocked" else "locked"}"
+                this.selected = selected
+                stateDescription = if (unlocked) label else "$label locked"
+                this.role = Role.Tab
+            }
+            .clickable(role = Role.Tab, onClickLabel = label) { onClick() }
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!unlocked) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LockedPackNote(
+    pack: com.vellum.notes.packs.PackId,
+    onUnlock: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.alpha(com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "${pack.title} is locked.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedButton(onClick = onUnlock, modifier = Modifier.fillMaxWidth()) {
+            Text("Unlock ${pack.title}")
+        }
     }
 }
 
@@ -1295,6 +1735,16 @@ private fun PageRail(
     onDeletePage: (Long) -> Unit = {},
     onHistoryPage: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
+    pdfUnlocked: Boolean = false,
+    gestureUnlocked: Boolean = false,
+    bookmarks: List<com.vellum.notes.packs.PageBookmark> = emptyList(),
+    showBookmarks: Boolean = false,
+    onOpenPageManager: () -> Unit = {},
+    onJumpBookmark: (Long) -> Unit = {},
+    onAddBookmark: () -> Unit = {},
+    onRemoveBookmark: (Long) -> Unit = {},
+    onLockedPack: (com.vellum.notes.packs.PackId) -> Unit = {},
+    onOpenGestureMapping: () -> Unit = {},
 ) {
     Surface(
         modifier = modifier.semantics { isTraversalGroup = true; traversalIndex = 3f },
@@ -1392,6 +1842,50 @@ private fun PageRail(
                     Icon(Icons.Filled.Add, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text("New page")
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            // PDF Power Tools entry: page-rail "Manage Pages". Locked at 38% alpha.
+            OutlinedButton(
+                onClick = onOpenPageManager,
+                modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                    .then(
+                        if (pdfUnlocked) Modifier
+                        else Modifier.alpha(com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA),
+                    )
+                    .semantics {
+                        contentDescription = "Manage pages ${if (pdfUnlocked) "unlocked" else "locked"}"
+                    },
+            ) {
+                Text("Manage Pages")
+            }
+            Spacer(Modifier.height(4.dp))
+            // Gesture/Bookmark Pack entry: bookmarks rail + gesture mapping.
+            if (showBookmarks) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(4.dp))
+                com.vellum.notes.packs.ui.BookmarksRail(
+                    bookmarks = bookmarks,
+                    currentPageId = currentPageId,
+                    unlocked = gestureUnlocked,
+                    onJump = onJumpBookmark,
+                    onAddCurrent = onAddBookmark,
+                    onRemove = onRemoveBookmark,
+                    onLockedClick = {
+                        onLockedPack(com.vellum.notes.packs.PackId.GESTURE)
+                    },
+                )
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onOpenGestureMapping,
+                    modifier = Modifier.fillMaxWidth()
+                        .then(
+                            if (gestureUnlocked) Modifier
+                            else Modifier.alpha(com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA),
+                        )
+                        .semantics { contentDescription = "Gesture mapping" },
+                ) {
+                    Text("Gesture mapping")
                 }
             }
         }
@@ -2015,6 +2509,15 @@ private fun CanvasTopBar(
     onToggleTranscriptSidebar: () -> Unit = {},
     classroomEnabled: Boolean = false,
     syncStatus: SyncStatus = SyncStatus.IDLE,
+    classroomUnlocked: Boolean = false,
+    pdfUnlocked: Boolean = false,
+    gestureUnlocked: Boolean = false,
+    onOpenClassroomExport: () -> Unit = {},
+    onOpenPageManager: () -> Unit = {},
+    onOpenLayeredExport: () -> Unit = {},
+    onOpenBookmarks: () -> Unit = {},
+    onOpenGestureMapping: () -> Unit = {},
+    onLockedPack: (com.vellum.notes.packs.PackId) -> Unit = {},
 ) {
     // Tapping the active pen/highlighter/eraser/shapes tool toggles its settings panel.
     var pickerOpen by remember { mutableStateOf(true) }
@@ -2058,6 +2561,15 @@ private fun CanvasTopBar(
             onInsertImage = onInsertImage,
             onPickTemplate = onPickTemplate,
             stripClick = { stripClick(it) },
+            classroomUnlocked = classroomUnlocked,
+            pdfUnlocked = pdfUnlocked,
+            gestureUnlocked = gestureUnlocked,
+            onOpenClassroomExport = onOpenClassroomExport,
+            onOpenPageManager = onOpenPageManager,
+            onOpenLayeredExport = onOpenLayeredExport,
+            onOpenBookmarks = onOpenBookmarks,
+            onOpenGestureMapping = onOpenGestureMapping,
+            onLockedPack = onLockedPack,
         )
     }
     // Context panel second row (existing): settings for the active tool / selection.
@@ -2107,6 +2619,15 @@ private fun FixedToolbarContent(
     onInsertImage: () -> Unit,
     onPickTemplate: () -> Unit,
     stripClick: (Tool) -> Unit,
+    classroomUnlocked: Boolean = false,
+    pdfUnlocked: Boolean = false,
+    gestureUnlocked: Boolean = false,
+    onOpenClassroomExport: () -> Unit = {},
+    onOpenPageManager: () -> Unit = {},
+    onOpenLayeredExport: () -> Unit = {},
+    onOpenBookmarks: () -> Unit = {},
+    onOpenGestureMapping: () -> Unit = {},
+    onLockedPack: (com.vellum.notes.packs.PackId) -> Unit = {},
 ) {
     // P0-2: 8 tools in the fixed row; the rest goes into the More overflow menu.
     // Order: Pen, Highlighter, Eraser, Select, Shapes, Text, Image, Template (+ Auto-erase).
@@ -2314,10 +2835,116 @@ private fun FixedToolbarContent(
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                         )
                     }
+                    // Revenue packs overflow: Export (Classroom) + Page Manager
+                    // (PDF) + Bookmarks (Gesture). Locked entries render at 38%
+                    // alpha and open the unlock dialog on tap.
+                    var packsOverflowOpen by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(
+                            onClick = { packsOverflowOpen = true },
+                            modifier = Modifier.size(48.dp).semantics {
+                                contentDescription = "Packs overflow menu"
+                                stateDescription =
+                                    if (packsOverflowOpen) "Packs expanded" else "Packs collapsed"
+                            },
+                        ) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "Packs overflow menu",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = packsOverflowOpen,
+                            onDismissRequest = { packsOverflowOpen = false },
+                        ) {
+                            PacksOverflowItem(
+                                label = "Export",
+                                pack = com.vellum.notes.packs.PackId.CLASSROOM,
+                                unlocked = classroomUnlocked,
+                                onClick = {
+                                    packsOverflowOpen = false
+                                    onOpenClassroomExport()
+                                },
+                            )
+                            PacksOverflowItem(
+                                label = "Layered export",
+                                pack = com.vellum.notes.packs.PackId.PDF,
+                                unlocked = pdfUnlocked,
+                                onClick = {
+                                    packsOverflowOpen = false
+                                    onOpenLayeredExport()
+                                },
+                            )
+                            PacksOverflowItem(
+                                label = "Page Manager",
+                                pack = com.vellum.notes.packs.PackId.PDF,
+                                unlocked = pdfUnlocked,
+                                onClick = {
+                                    packsOverflowOpen = false
+                                    onOpenPageManager()
+                                },
+                            )
+                            PacksOverflowItem(
+                                label = "Bookmarks",
+                                pack = com.vellum.notes.packs.PackId.GESTURE,
+                                unlocked = gestureUnlocked,
+                                onClick = {
+                                    packsOverflowOpen = false
+                                    onOpenBookmarks()
+                                },
+                            )
+                            PacksOverflowItem(
+                                label = "Gesture mapping",
+                                pack = com.vellum.notes.packs.PackId.GESTURE,
+                                unlocked = gestureUnlocked,
+                                onClick = {
+                                    packsOverflowOpen = false
+                                    onOpenGestureMapping()
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun PacksOverflowItem(
+    label: String,
+    pack: com.vellum.notes.packs.PackId,
+    unlocked: Boolean,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    com.vellum.notes.packs.ui.packIcon(pack),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp).then(
+                        if (unlocked) Modifier
+                        else Modifier.alpha(com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA),
+                    ),
+                    tint = if (unlocked) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(
+                        alpha = com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA,
+                    ),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    if (unlocked) label else "$label (locked)",
+                    modifier = Modifier.then(
+                        if (unlocked) Modifier
+                        else Modifier.alpha(com.vellum.notes.packs.ui.LOCKED_PACK_ALPHA),
+                    ),
+                )
+            }
+        },
+        onClick = onClick,
+    )
 }
 
 @Composable

@@ -77,6 +77,7 @@ import com.vellum.notes.ui.sync.SyncSection
 import com.vellum.notes.ui.theme.VellumTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object Routes {
     const val HOME = "home"
@@ -193,6 +194,67 @@ fun SettingsScreen(
 ) {
     val settings by settingsRepository.settingsFlow.collectAsState(initial = PalmRejectionSettings())
     val scope = rememberCoroutineScope()
+    val app = LocalContext.current.applicationContext as VellumApp
+    val packRepository = app.container.packRepository
+    val packUnlocker = app.container.packUnlocker
+    val packBilling = app.container.packBilling
+    val entitlements by packRepository.entitlements.collectAsState(
+        initial = com.vellum.notes.packs.PackEntitlements(),
+    )
+    var unlockPack by remember { mutableStateOf<com.vellum.notes.packs.PackId?>(null) }
+    var unlockMessage by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val licensePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().toString(Charsets.UTF_8)
+                    }
+                }.getOrNull()
+            }
+            if (text == null) {
+                unlockMessage = "Could not read that license file."
+            } else {
+                val unlocked = packUnlocker.importLicenseText(text)
+                unlockMessage = if (unlocked.isEmpty()) "Invalid license file."
+                else "Unlocked: ${unlocked.joinToString { it.title }}"
+            }
+        }
+    }
+    unlockPack?.let { pack ->
+        com.vellum.notes.packs.ui.PackUnlockDialog(
+            pack = pack,
+            purchaseAvailable = packBilling.isAvailable,
+            restoreMessage = null,
+            licenseMessage = unlockMessage,
+            onRestorePurchases = {
+                scope.launch {
+                    val owned = packUnlocker.restorePurchases()
+                    unlockMessage = if (owned.isEmpty()) "No purchases found."
+                    else "Restored: ${owned.joinToString { it.title }}"
+                }
+            },
+            onImportLicense = { licensePicker.launch(arrayOf("*/*")) },
+            onBuyPack = {
+                scope.launch {
+                    val activity = context as? android.app.Activity
+                    if (activity != null) {
+                        packBilling.launchPurchase(activity, pack)
+                        val owned = packUnlocker.restorePurchases()
+                        unlockMessage = if (owned.isEmpty()) "Purchase flow unavailable — use Import License."
+                        else "Restored: ${owned.joinToString { it.title }}"
+                    } else {
+                        unlockMessage = "Purchase unavailable — use Import License."
+                    }
+                }
+            },
+            onDismiss = { unlockPack = null; unlockMessage = null },
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -206,7 +268,9 @@ fun SettingsScreen(
         }
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            SettingsContent(settings = settings, onSettingChange = { newSettings ->
+            SettingsContent(settings = settings, packEntitlements = entitlements,
+                onPackClick = { unlockPack = it },
+                onSettingChange = { newSettings ->
                 scope.launch {
                     settingsRepository.updateSettings { 
                         this.mode = newSettings.mode 
@@ -266,6 +330,8 @@ fun SettingsContent(
     syncRepository: SyncRepository,
     notesRepository: NotesRepository,
     onOpenDiagnostics: () -> Unit = {},
+    packEntitlements: com.vellum.notes.packs.PackEntitlements = com.vellum.notes.packs.PackEntitlements(),
+    onPackClick: (com.vellum.notes.packs.PackId) -> Unit = {},
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
     Column(Modifier.padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -721,6 +787,11 @@ fun SettingsContent(
             }
         }
 
+        SettingsSectionDivider()
+        com.vellum.notes.packs.ui.PacksCardGrid(
+            entitlements = packEntitlements,
+            onPackClick = onPackClick,
+        )
         SettingsSectionDivider()
         SettingsSectionTitle("Device Sync")
         SyncSection(
