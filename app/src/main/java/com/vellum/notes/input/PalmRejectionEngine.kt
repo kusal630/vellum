@@ -390,12 +390,21 @@ class PalmRejectionEngine(
         const val COLD_START_PROMOTE_DISTANCE_MM = 4f
     }
 
+    /**
+     * SENT-M2: the writing-lock hold-off is lifted only for the finger tool when
+     * finger writing is enabled. Every other tool (stylus, palm-sized contacts)
+     * still respects the hold-off so a resting palm cannot claim writing right
+     * after a lift.
+     */
+    private fun shouldRespectHoldoff(tool: ToolKind): Boolean =
+        !(currentSettings.enableFingerWriting &&
+            (tool == ToolKind.FINGER || tool == ToolKind.UNKNOWN))
+
     private fun manageWritingLock(
         frame: InputFrame,
         classified: List<ClassifiedContact>,
         nowNanos: Long,
-    ): Int? {
-        // Track per-pointer motion state for contacts that are down.
+    ): Int? {        // Track per-pointer motion state for contacts that are down.
         for (c in classified) {
             val cid = c.contact.pointerId
             val s = pointerStates[cid]
@@ -431,12 +440,14 @@ class PalmRejectionEngine(
                             it.classification == ContactClassification.WRITING
                     }
                     if (candidate != null) {
-                        // Finger writing lifts the hold-off so fast consecutive strokes
-                        // are never dropped; a genuine palm is never a WRITING candidate.
+                        // SENT-M2: finger writing lifts the hold-off ONLY for the
+                        // finger tool itself, so fast consecutive finger strokes are
+                        // never dropped. A global lift let a resting palm (or any
+                        // other tool) sneak through the hold-off window.
                         lock.tryClaim(
                             frame.addedPointerId,
                             nowNanos,
-                            respectHoldoff = !currentSettings.enableFingerWriting,
+                            respectHoldoff = shouldRespectHoldoff(candidate.contact.toolType),
                         )
                         if (lock.activePointerId == frame.addedPointerId) pendingCandidateId = null
                     } else {
@@ -490,7 +501,7 @@ class PalmRejectionEngine(
                                 lock.tryClaim(
                                     addedId,
                                     nowNanos,
-                                    respectHoldoff = !currentSettings.enableFingerWriting,
+                                    respectHoldoff = shouldRespectHoldoff(added.contact.toolType),
                                 )
                             }
                         } else {
