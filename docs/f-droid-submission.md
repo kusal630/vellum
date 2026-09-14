@@ -1,6 +1,6 @@
 # F-Droid Submission Guide
 
-This document is a reference for submitting Premium Notes to the official
+This document is a reference for submitting Vellum to the official
 F-Droid repository. It is **not** the fdroiddata metadata file — that file
 lives in the [fdroiddata](https://gitlab.com/fdroid/fdroiddata) repository
 and is maintained by the F-Droid team. Copy the block below when a merge
@@ -45,9 +45,10 @@ Categories:
   - Writing
 License: GPL-3.0-or-later
 AuthorName: codeRed
-WebSite:
+WebSite: https://github.com/kusal630/vellum
 SourceCode: https://github.com/kusal630/vellum
 IssueTracker: https://github.com/kusal630/vellum/issues
+Donate: https://buymeacoffee.com/kusal630
 
 AutoName: Vellum
 Summary: Offline handwriting notes with palm rejection

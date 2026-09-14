@@ -46,6 +46,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -723,6 +727,8 @@ fun SettingsContent(
             syncRepository = syncRepository,
             notesRepository = notesRepository,
         )
+        SettingsSectionDivider()
+        SupportSection()
     }
 }
 
@@ -892,4 +898,47 @@ private fun SettingsSectionDivider() {
     Spacer(Modifier.height(24.dp))
     HorizontalDivider()
     Spacer(Modifier.height(24.dp))
+}
+
+@Composable
+private fun SupportSection() {
+    val context = LocalContext.current
+    val openUrl = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("Support Vellum", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Vellum is free and offline — no ads, no tracking, no paywall. If it earns its place in your pocket, supporting it funds palm-rejection calibration devices, F-Droid and Play fees, and late-night ink-smoothing sessions.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            androidx.compose.material3.Button(
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://buymeacoffee.com/kusal630"))
+                    context.startActivity(Intent.createChooser(intent, "Support Vellum"))
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("Buy Me a Coffee") }
+            androidx.compose.material3.OutlinedButton(
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/sponsors/kusal630"))
+                    context.startActivity(Intent.createChooser(intent, "Support Vellum"))
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("GitHub Sponsors") }
+        }
+        Spacer(Modifier.height(8.dp))
+        androidx.compose.material3.OutlinedButton(
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://liberapay.com/kusal630"))
+                context.startActivity(Intent.createChooser(intent, "Support Vellum"))
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Liberapay") }
+    }
 }

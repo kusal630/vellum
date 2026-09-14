@@ -1,5 +1,9 @@
 package com.vellum.notes.input
 
+import android.os.Build
+import android.view.MotionEvent
+import android.view.MotionEvent.FLAG_CANCELED
+import android.view.MotionEvent.TOOL_TYPE_STYLUS
 import kotlin.math.hypot
 
 /**
@@ -91,8 +95,59 @@ class PalmRejectionEngine(
         val activeSizesMm = normalized.map { it.maxDimMm }
 
         val baseClassified = mutableListOf<ClassifiedContact>()
-        for (contact in normalized) {
+        for (i in normalized.indices) {
+            val rawContact = frame.contacts[i]
+            val contact = normalized[i]
             val state = pointerStates[contact.pointerId]
+
+            // Per-contact OS-detected cancellation (API 33+): if this individual pointer was
+            // flagged by the system as an unintentional touch (palm, grip, bezel), reject it
+            // immediately regardless of size or zone. The parser only remaps the ACTION to
+            // CANCEL for the whole frame; here we reject the specific flagged contact inline
+            // so a valid writer in the same frame is not affected.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                (rawContact.flags and FLAG_CANCELED) != 0
+            ) {
+                val c = ClassifiedContact(
+                    contact = contact,
+                    classification = ContactClassification.PALM,
+                    confidence = 0.95f,
+                    reason = ClassificationReason.LARGE_CONTACT,
+                    effectiveThresholdMm = 0f,
+                    speedMmPerSec = state?.speedMmPerSec ?: 0f,
+                    durationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
+                )
+                baseClassified += c
+                classifier.updateHistory(c)
+                continue
+            }
+
+            // Stylus hover gating (API 26+): when any stylus is hovering above the screen
+            // (AXIS_DISTANCE > 0), any simultaneous finger contact is almost certainly a
+            // palm resting while the pen is poised to write. Suppress the finger as RESTING
+            // so it does not draw or drive gestures. Only suppresses when the hovering stylus
+            // is not already the locked writer (don't kill an in-progress stroke).
+            val hoverSuppressed = currentSettings.palmRejectionEnabled &&
+                contact.toolType == ToolKind.FINGER && lock.activePointerId != contact.pointerId &&
+                frame.contacts.any { c ->
+                    c.toolTypeRaw == TOOL_TYPE_STYLUS &&
+                        rawContact.hoverDistance != null && rawContact.hoverDistance > 0f
+                }
+            if (hoverSuppressed) {
+                val c = ClassifiedContact(
+                    contact = contact,
+                    classification = ContactClassification.RESTING,
+                    confidence = 0.7f,
+                    reason = ClassificationReason.RESTING_STATIONARY,
+                    effectiveThresholdMm = 0f,
+                    speedMmPerSec = state?.speedMmPerSec ?: 0f,
+                    durationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
+                    downX = state?.startX,
+                    downY = state?.startY,
+                )
+                baseClassified += c
+                continue
+            }
 
             // The user-reserved palm rest zone is authoritative for FINGER contacts: any
             // finger contact whose center falls inside it is the resting palm. It can never

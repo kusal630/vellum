@@ -2,6 +2,9 @@
 
 **Private, fully offline handwriting notes for Android — with a software palm-rejection pipeline at its core.**
 
+![GitHub Sponsors](https://img.shields.io/github/sponsors/kusal630?label=Sponsor&color=181717)
+![Liberapay](https://img.shields.io/liberapay/recipients/kusal630?label=Liberapay&color=24292e)
+
 Write naturally with a stylus or your finger. Raw touch input is analyzed in real time to reliably ignore palm rests, so only your pen or writing finger leaves ink — no proprietary or cloud service required. Everything stays on your device: notes, ink, images, transcripts.
 
 > ⬇️ **Download:** grab the latest APK from [**Releases**](https://github.com/kusal630/vellum/releases) (`app-release.apk`, release-signed, ~90MB — includes the on-device speech model).
