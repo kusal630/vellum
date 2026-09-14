@@ -587,6 +587,12 @@ class PalmRejectionEngine(
                     // a fresh touch.
                     restingTracker.removePointer(lifted)
                 }
+                // SENT-C1: drop any stale IDs so a reused pointer ID starts fresh.
+                // Without this, stale velocity/pressure in pointerStates makes the
+                // engine classify a new pen stroke as palm (velocity spike).
+                val activeIds = frame.contacts.map { it.pointerId }.toSet() -
+                    (lifted?.let { setOf(it) } ?: emptySet())
+                pointerStates.keys.retainAll(activeIds)
             }
 
             InputAction.CANCEL -> {
@@ -597,6 +603,8 @@ class PalmRejectionEngine(
                 // tracker's motion states and noise estimate must not leak into the
                 // next gesture (stale RESTING/CANDIDATE would swallow the next stroke).
                 restingTracker.reset()
+                // SENT-C1: defensive — no stale IDs survive the next frame.
+                pointerStates.keys.retainAll(emptySet())
             }
 
             InputAction.MOVE -> Unit
