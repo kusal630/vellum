@@ -129,9 +129,9 @@ class PalmRejectionEngine(
             // is not already the locked writer (don't kill an in-progress stroke).
             val hoverSuppressed = currentSettings.palmRejectionEnabled &&
                 contact.toolType == ToolKind.FINGER && lock.activePointerId != contact.pointerId &&
-                frame.contacts.any { c ->
-                    c.toolTypeRaw == TOOL_TYPE_STYLUS &&
-                        rawContact.hoverDistance != null && rawContact.hoverDistance > 0f
+                frame.contacts.any { other ->
+                    other.toolTypeRaw == TOOL_TYPE_STYLUS &&
+                        other.hoverDistance != null && other.hoverDistance > 0f
                 }
             if (hoverSuppressed) {
                 val c = ClassifiedContact(
