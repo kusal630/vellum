@@ -127,8 +127,12 @@ class PalmRejectionEngine(
             // palm resting while the pen is poised to write. Suppress the finger as RESTING
             // so it does not draw or drive gestures. Only suppresses when the hovering stylus
             // is not already the locked writer (don't kill an in-progress stroke).
+            // A finger pair is a pan/zoom candidate that must never be hover-suppressed.
+            // Exempt two-finger gestures so pan/zoom still works while the pen hovers.
+            val isGestureCandidate = frame.contacts.count { it.toolTypeRaw == MotionEvent.TOOL_TYPE_FINGER } >= 2
             val hoverSuppressed = currentSettings.palmRejectionEnabled &&
                 contact.toolType == ToolKind.FINGER && lock.activePointerId != contact.pointerId &&
+                !isGestureCandidate &&
                 frame.contacts.any { other ->
                     other.toolTypeRaw == TOOL_TYPE_STYLUS &&
                         other.hoverDistance != null && other.hoverDistance > 0f
