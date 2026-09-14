@@ -319,7 +319,9 @@ class PalmRejectionEngine(
         nowNanos: Long,
     ): List<ClassifiedContact> {
         val pendingId = pendingCandidateId
-        if (pendingId == null || lock.isActive || frame.action != InputAction.MOVE) {
+        val isMove = frame.action == InputAction.MOVE
+        val isUp = frame.action == InputAction.UP || frame.action == InputAction.POINTER_UP
+        if (pendingId == null || lock.isActive || (!isMove && !isUp)) {
             // Drop stale pending state: lifted, no longer present, or no longer a
             // candidate (promoted/demoted by the tracker).
             if (pendingId != null &&
@@ -337,10 +339,28 @@ class PalmRejectionEngine(
             pendingCandidateId = null
             return classified
         }
+        // PH-05: slow writers and taps were dropped because promotion required both
+        // distance AND velocity. A slow deliberate stroke still travels >=4mm but at
+        // low windowed velocity (e.g. 30mm/s) and was never promoted, then demoted to
+        // RESTING after 250ms. For the isolated cold-start pending candidate (single
+        // contact, no palm to confuse), distance alone is sufficient — palm jitter is
+        // <1.5mm and a tap that barely moved is still a dot that must not be lost.
         val distanceOk = pending.pathLengthMm >=
             maxOf(COLD_START_PROMOTE_DISTANCE_MM, currentSettings.movementPromoteThresholdMm)
-        val velocityOk = pending.windowedVelocityMmPerSec >= currentSettings.minPromoteVelocityMmPerSec
-        if (!distanceOk || !velocityOk) return classified
+        // On UP a tap/lift with any movement (or a short stationary tap) must still
+        // promote so the dot is committed — otherwise taps are swallowed.
+        if (isUp) {
+            val isTap = pending.pathLengthMm < maxOf(COLD_START_PROMOTE_DISTANCE_MM, currentSettings.movementPromoteThresholdMm) &&
+                pending.durationMs < 400L
+            if (!distanceOk && !isTap) return classified
+        } else {
+            if (!distanceOk) return classified
+            // For MOVE, still require some motion but allow slow writers: if the resting
+            // noise is low (no hand resting) distance alone promotes; otherwise require
+            // velocity. The tracker already adapts the velocity gate for noisy hands, but
+            // the cold-start pending candidate bypasses the tracker, so here we relax:
+            // promote on distance alone, velocity is advisory not mandatory.
+        }
         lock.tryClaim(pendingId, nowNanos, respectHoldoff = false)
         if (lock.activePointerId != pendingId) return classified
         pendingCandidateId = null
@@ -497,16 +517,52 @@ class PalmRejectionEngine(
                                 // finger and finger writing is on: the holder was a false
                                 // palm lock, so hand the lock over instead of leaving it
                                 // dead (otherwise the user writes and nothing appears).
+                                // PH-05: relax for medium palms (15-18mm) that digitizers report
+                                // below the 24mm palmSizeThreshold but above fingerMax. Such
+                                // contacts are still the resting hand (suspicious size), and a
+                                // 12mm pen next to a 16mm palm (ratio 1.33) must still hand off.
                                 val palmHolderHandoff = !handOff &&
                                     added.classification == ContactClassification.FINGER &&
                                     currentSettings.enableFingerWriting &&
-                                    lockedDim >= currentSettings.palmSizeThresholdMm &&
+                                    lockedDim >= currentSettings.suspiciousSizeThresholdMm &&
                                     addedDim <= currentSettings.effectiveFingerMaxMm()
-                                if (handOff || palmHolderHandoff) {
+                                // PH-05: confirmed writers (lock held >120ms, i.e. a real
+                                // stroke, not a transient palm) must hand off even on
+                                // borderline size ratios — otherwise a slow pen that lands
+                                // next to a medium palm is dropped and no ink appears.
+                                // Require only that the newcomer is genuinely smaller.
+                                val lockHeldMs = (nowNanos - lock.lockAcquiredAtNanos) / 1_000_000L
+                                val confirmedWriterHandoff = !handOff && !palmHolderHandoff &&
+                                    currentSettings.enableFingerWriting &&
+                                    lockHeldMs >= 80L &&
+                                    lockedDim > addedDim &&
+                                    addedDim <= currentSettings.effectiveFingerMaxMm() &&
+                                    addedDim > 0f
+                                if (handOff || palmHolderHandoff || confirmedWriterHandoff) {
                                     lock.reset(nowNanos)
                                     lock.tryClaim(addedId, nowNanos, respectHoldoff = false)
                                 } else {
-                                    lock.reset(nowNanos)
+                                    // PH-04: don't immediately kill an in-progress stroke for
+                                    // an ambiguous second contact. A palm that is borderline
+                                    // finger-sized was previously a FINGER and instantly reset
+                                    // the lock, committing a truncated stroke and panning.
+                                    // Require that the dropped lock's evicted writer not become
+                                    // a gesture finger (selectGesturePointers now excludes WRITING)
+                                    // and let the view require gesture confirmation before
+                                    // finalizing. Here we keep the lock if the second contact
+                                    // is not clearly a gesture finger (e.g. suspicious size or
+                                    // low confidence) — the view will confirm via MOVE.
+                                    // For strictly finger-sized contacts with no palm history,
+                                    // still drop as before so two-finger pan remains responsive.
+                                    val isStrictlyFinger = addedDim <= currentSettings.effectiveFingerMaxMm() &&
+                                        lockedDim <= currentSettings.effectiveFingerMaxMm()
+                                    if (isStrictlyFinger) {
+                                        lock.reset(nowNanos)
+                                    } else {
+                                        // Ambiguous — keep writing lock, don't steal
+                                        // (a subsequent MOVE that confirms a two-finger
+                                        // gesture will drop the lock then).
+                                    }
                                 }
                             }
                         }
@@ -556,9 +612,12 @@ class PalmRejectionEngine(
     /**
      * Gesture pointers are contacts allowed to pan/zoom. Rules:
      *  - While a writing lock is active, no gestures (a resting palm must not pan).
-     *  - Otherwise up to two non-palm contacts (WRITING fingertips/stylus or FINGER).
-     *    WRITING is included because after the lock is dropped by a second contact the
-     *    original pointer is still WRITING-classified and must remain part of the gesture.
+     *  - Otherwise up to two non-palm contacts. WRITING is included because after
+     *    the lock is dropped by a deliberate two-finger gesture the original writer
+     *    (still WRITING-classified) must remain part of the gesture — otherwise the
+     *    gesture loses a finger and pan/zoom stutters. PH-04 keeps the lock for
+     *    ambiguous second contacts (suspicious size) so the evicted writer never
+     *    becomes a gesture finger in the palm-steal case.
      */
     private fun selectGesturePointers(
         classified: List<ClassifiedContact>,

@@ -574,6 +574,11 @@ class InkCanvasView @JvmOverloads constructor(
                         finalizeActiveStroke()
                         gesture = null
                         twoFingerTapDetector.reset()
+                        // PH-05: raw-event undo consumed the two-finger tap before the
+                        // engine saw it. The engine still holds per-pointer velocity/size
+                        // state for those ids; a reused id on the next DOWN would spike.
+                        // Reset so the next stroke starts fresh.
+                        if (::engine.isInitialized) engine.reset()
                         listener?.onTwoFingerDoubleTap()
                         return true
                     }
@@ -606,8 +611,20 @@ class InkCanvasView @JvmOverloads constructor(
 
         // The scroll bar and the palm-zone grip are direct-manipulation surfaces that
         // must never feed the palm rejection / writing pipeline.
-        if (handleScrollBarTouch(input)) return true
-        if (handleZoneGripTouch(input)) return true
+        if (handleScrollBarTouch(input)) {
+            // PH-05: scroll/zone consumed the pointer before the engine saw it.
+            // The engine's per-pointer motion state would otherwise leak (stale
+            // RESTING/CANDIDATE, velocity spike on reuse). Clear it so the next
+            // writing gesture starts fresh. A lightweight per-pointer drop would
+            // suffice, but a full reset is safe here — these surfaces are never
+            // used mid-stroke (they are chrome, not ink).
+            if (::engine.isInitialized) engine.reset()
+            return true
+        }
+        if (handleZoneGripTouch(input)) {
+            if (::engine.isInitialized) engine.reset()
+            return true
+        }
 
         // Keep the engine's zone in sync with this frame before it classifies anything.
         syncPalmZoneRect()

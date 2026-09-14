@@ -446,9 +446,64 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                                         finalCls = ContactClassification.FINGER
                                     }
                                 }
+                                // PH-05: slow writers and taps were dropped because
+                                // promotion required windowed velocity >=120mm/s. A slow
+                                // deliberate stroke (e.g. 40mm/s) or a tap dot travels
+                                // >=3mm but fails the velocity gate, stays CANDIDATE for
+                                // 250ms, then is demoted to RESTING and never draws.
+                                // Relax: if the candidate has travelled enough distance
+                                // and is the unique non-palm contact, promote it even at
+                                // low velocity (distance is the deliberate-stroke signal).
+                                // Guard with the adaptive velocity gate: when the resting
+                                // hand itself is noisy (effectivePromoteVelocity raised
+                                // well above the configured minimum) distance alone must
+                                // NOT promote — otherwise a 160mm/s mover is promoted
+                                // even though the adaptive gate is 330mm/s (see
+                                // adaptiveNoiseRaisesPromoteVelocity).
+                                capabilities.dimFromPx(st.totalDistPx) >= settings.movementPromoteThresholdMm &&
+                                    activeWritingPointerId == null &&
+                                    !inDriftingCluster(id) &&
+                                    effectivePromoteVelocity() <= settings.minPromoteVelocityMmPerSec * 1.1f -> {
+                                    // Unique mover check using slow movement (distance only)
+                                    // — if more than one contact moved this frame, it's a
+                                    // gesture, not a writer.
+                                    val movedThisFrame = st.lastFrameDistPx > pxPerMm * MOVEMENT_JITTER_MM
+                                    val otherMovers = baseClassified.count { c2 ->
+                                        val st2 = pointerStates[c2.contact.pointerId]
+                                        st2 != null && st2.lastFrameDistPx > pxPerMm * MOVEMENT_JITTER_MM &&
+                                            c2.contact.pointerId != id &&
+                                            c2.classification != ContactClassification.PALM &&
+                                            c2.classification != ContactClassification.REJECTED
+                                    }
+                                    if (movedThisFrame && otherMovers == 0) {
+                                        finalCls = ContactClassification.WRITING
+                                        reason = ClassificationReason.PROMOTED_TO_WRITING
+                                        promoteId = id
+                                    } else if (otherMovers > 0) {
+                                        finalCls = ContactClassification.FINGER
+                                    } else {
+                                        // Not moving this frame but has travelled before;
+                                        // keep buffering rather than demoting to RESTING
+                                        // — a slow writer that pauses briefly is still a
+                                        // writer, not a resting finger.
+                                        finalCls = ContactClassification.CANDIDATE
+                                        reason = ClassificationReason.CANDIDATE_BUFFER
+                                    }
+                                }
                                 stationaryMs(st) >= settings.candidateEvaluationWindowMs -> {
-                                    finalCls = ContactClassification.RESTING
-                                    reason = restingReason(c)
+                                    // PH-05: don't demote an isolated candidate that has
+                                    // travelled a meaningful distance but is now stationary
+                                    // (slow writer pausing). Only demote if it never moved
+                                    // like a stroke and is in a resting context (edge/
+                                    // cluster/palm) or truly never moved at all.
+                                    val travelled = capabilities.dimFromPx(st.totalDistPx)
+                                    if (travelled >= settings.movementPromoteThresholdMm) {
+                                        finalCls = ContactClassification.CANDIDATE
+                                        reason = ClassificationReason.CANDIDATE_BUFFER
+                                    } else {
+                                        finalCls = ContactClassification.RESTING
+                                        reason = restingReason(c)
+                                    }
                                 }
                                 inDriftingCluster(id) -> {
                                     // Slow coherent whole-hand movement is not a stroke.
