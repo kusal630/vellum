@@ -610,12 +610,15 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         minVel: Float,
         settings: PalmRejectionSettings,
     ): Float {
-        val velScore = (st.windowedVelocityMmPerSec / minVel).coerceIn(0f, 1f)
+        // SENT-C3: every divisor is guarded — a zero velocity/path/size threshold (or a
+        // zero window sample count) produced NaN, poisoning the resting-hand score so
+        // every frame re-evaluated (CPU spin).
+        val velScore = (st.windowedVelocityMmPerSec / minVel.coerceAtLeast(EPSILON)).coerceIn(0f, 1f)
         val pathScore =
-            (capabilities.dimFromPx(st.totalDistPx) / settings.movementPromoteThresholdMm).coerceIn(0f, 1f)
+            (capabilities.dimFromPx(st.totalDistPx) / settings.movementPromoteThresholdMm.coerceAtLeast(EPSILON)).coerceIn(0f, 1f)
         val contScore = if (st.recentSamples.size <= 1) 0f
-        else st.movingSampleCount.toFloat() / (st.recentSamples.size - 1).toFloat()
-        val sizeScore = (1f - st.smoothedContactSizeMm / settings.palmSizeThresholdMm).coerceIn(0f, 1f)
+        else st.movingSampleCount.toFloat() / (st.recentSamples.size - 1).toFloat().coerceAtLeast(EPSILON)
+        val sizeScore = (1f - st.smoothedContactSizeMm / settings.palmSizeThresholdMm.coerceAtLeast(EPSILON)).coerceIn(0f, 1f)
         return velScore * VEL_WEIGHT + pathScore * PATH_WEIGHT +
             contScore * CONT_WEIGHT + sizeScore * SIZE_WEIGHT
     }
@@ -627,14 +630,15 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         inCluster: Boolean,
         edgeAdjacent: Boolean,
     ): Float {
+        // SENT-C3: guarded like writeScoreFor — see above.
         val statScore = if (st.recentSamples.size <= 1) 1f
-        else 1f - st.movingSampleCount.toFloat() / (st.recentSamples.size - 1).toFloat()
+        else 1f - st.movingSampleCount.toFloat() / (st.recentSamples.size - 1).toFloat().coerceAtLeast(EPSILON)
         val clusterScore = if (inCluster) 1f else 0f
         val edgeScore = if (edgeAdjacent) 1f else 0f
-        val sizeScore = (st.smoothedContactSizeMm / settings.palmSizeThresholdMm).coerceIn(0f, 1f)
+        val sizeScore = (st.smoothedContactSizeMm / settings.palmSizeThresholdMm.coerceAtLeast(EPSILON)).coerceIn(0f, 1f)
         val growthRatio =
-            if (st.initialContactSizeMm > 0f) st.smoothedContactSizeMm / st.initialContactSizeMm else 0f
-        val growthScore = (growthRatio / settings.palmGrowthFactor).coerceIn(0f, 1f)
+            if (st.initialContactSizeMm > 0f) st.smoothedContactSizeMm / st.initialContactSizeMm.coerceAtLeast(EPSILON) else 0f
+        val growthScore = (growthRatio / settings.palmGrowthFactor.coerceAtLeast(EPSILON)).coerceIn(0f, 1f)
         return statScore * STAT_WEIGHT + clusterScore * CLUSTER_WEIGHT +
             edgeScore * EDGE_WEIGHT + sizeScore * REST_SIZE_WEIGHT + growthScore * GROWTH_WEIGHT
     }
@@ -651,6 +655,13 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
     companion object {
         /** Movement below this (mm) is treated as jitter and does not reset the "stationary" clock. */
         const val MOVEMENT_JITTER_MM = 1.5f
+
+        /**
+         * SENT-C3: floor for every divisor in the write/rest score math. Zero
+         * velocity/path/size/growth thresholds divided straight into NaN, which
+         * poisoned the resting-hand score and forced re-evaluation every frame.
+         */
+        const val EPSILON = 0.0001f
 
         /** Blend factor for the exponential moving average of contact size. */
         const val SIZE_SMOOTH_FACTOR = 0.3f
