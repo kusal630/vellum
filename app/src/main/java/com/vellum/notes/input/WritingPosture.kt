@@ -61,11 +61,16 @@ enum class WritingPosture {
 
 /**
  * Returns a copy with [posture] applied and the palm-zone side synced to it
- * (when the posture has a palm side). The zone side stays user-overridable
- * afterwards — this only sets the matching default on change.
+ * (when the posture has a palm side). The zone center follows the handedness-
+ * biased default (LEFT -> 0.18, RIGHT -> 0.82) so a handedness switch moves the
+ * default rest position to the matching screen side. The zone side/position
+ * stays user-overridable afterwards — this only sets the matching default on
+ * change.
  */
 fun PalmRejectionSettings.withWritingPosture(posture: WritingPosture): PalmRejectionSettings =
     copy(
         writingPosture = posture,
-        palmZone = posture.palmSide()?.let { palmZone.copy(side = it) } ?: palmZone,
+        palmZone = posture.palmSide()?.let {
+            palmZone.copy(side = it, centerXFrac = PalmZone.defaultCenterXFracFor(it))
+        } ?: palmZone,
     )

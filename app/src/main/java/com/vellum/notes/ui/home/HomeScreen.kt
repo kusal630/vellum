@@ -441,7 +441,19 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxHeight().width(300.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerLow,
                     ) {
-                        sidebar { scope.launch { drawerState.close() } }
+                        // D5: phone drawer gets an explicit close X (48dp, top-end)
+                        // so it is dismissible without a swipe or a nav selection.
+                        Box(Modifier.fillMaxSize()) {
+                            sidebar { scope.launch { drawerState.close() } }
+                            IconButton(
+                                onClick = { scope.launch { drawerState.close() } },
+                                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.CircleShape),
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close navigation drawer")
+                            }
+                        }
                     }
                 },
             ) {
@@ -1175,7 +1187,7 @@ private fun HomeContent(
             var enter by remember(section) { mutableStateOf(false) }
             LaunchedEffect(section) { enter = true }
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(160.dp),
+                columns = GridCells.Adaptive(140.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 88.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -1301,6 +1313,16 @@ private fun ShelfNotebookCard(
                     ),
                 ),
         ) {
+            // D4: top scrim (black 45% -> transparent over the top 48dp) so the
+            // white star + overflow icons stay visible on pale covers (Aurum).
+            Box(
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().height(48.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent),
+                        ),
+                    ),
+            )
             if (notebook.isFavorite) {
                 Icon(
                     Icons.Filled.Star,

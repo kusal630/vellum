@@ -64,11 +64,20 @@ data class PalmZone(
         copy(centerXFrac = cx.coerceIn(0f, 1f), centerYFrac = cy.coerceIn(0f, 1f), mode = PalmZoneMode.MANUAL)
 
     companion object {
+        /**
+         * Handedness-biased default horizontal center for a zone side.
+         * LEFT (typical right-handed rest) sits at 18% of the screen width;
+         * RIGHT (typical left-handed rest) mirrors to 82%.
+         */
+        fun defaultCenterXFracFor(side: PalmZoneSide): Float =
+            if (side == PalmZoneSide.LEFT) 0.18f else 0.82f
+
         /** A zone sized around a measured palm with comfortable padding. */
         fun fromPalm(palmWidthMm: Float, palmHeightMm: Float, side: PalmZoneSide): PalmZone =
             PalmZone(
                 mode = PalmZoneMode.AUTO,
                 side = side,
+                centerXFrac = defaultCenterXFracFor(side),
                 widthMm = palmWidthMm * 1.8f,
                 heightMm = palmHeightMm * 1.4f,
             )

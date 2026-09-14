@@ -902,9 +902,13 @@ fun EditorScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         // BUG 2: once-per-install coachmark. Display condition is the
-                        // persisted showPalmZoneCoachmark flag (DataStore, default true);
+                        // persisted showPalmZoneCoachmark flag (DataStore, default true)
+                        // AND manual zone mode — in AUTO/OFF there is no handle to
+                        // point at, so an orphan bubble would be a phantom tip.
                         // Got-it persists false so it shows exactly once per install.
-                        if (settings.showPalmZoneCoachmark) {
+                        if (settings.showPalmZoneCoachmark &&
+                            settings.palmZone.mode == com.vellum.notes.input.PalmZoneMode.MANUAL
+                        ) {
                             PalmZoneCoachmark(
                                 onDismiss = {
                                     scope.launch {
@@ -915,22 +919,25 @@ fun EditorScreen(
                                 },
                             )
                         }
-                        // BUG 3: handle is always composed (visible by default in every
-                        // zone mode — never gated); drag resizes + persists palmZone.
-                        PalmZoneHandle(
-                            settings = settings,
-                            onResize = { newWidthMm, newHeightMm ->
-                                scope.launch {
-                                    app.container.settingsRepository.updateSettings {
-                                        palmZone = palmZone.copy(
-                                            widthMm = newWidthMm.coerceIn(40f, 140f),
-                                            heightMm = newHeightMm.coerceIn(28f, 110f),
-                                            mode = com.vellum.notes.input.PalmZoneMode.MANUAL,
-                                        )
+                        // D3: handle is composed ONLY in MANUAL zone mode. In AUTO/OFF
+                        // there is no box (pure contact-size rejection), so composing
+                        // it would leave a phantom handle over the canvas.
+                        if (settings.palmZone.mode == com.vellum.notes.input.PalmZoneMode.MANUAL) {
+                            PalmZoneHandle(
+                                settings = settings,
+                                onResize = { newWidthMm, newHeightMm ->
+                                    scope.launch {
+                                        app.container.settingsRepository.updateSettings {
+                                            palmZone = palmZone.copy(
+                                                widthMm = newWidthMm.coerceIn(40f, 140f),
+                                                heightMm = newHeightMm.coerceIn(28f, 110f),
+                                                mode = com.vellum.notes.input.PalmZoneMode.MANUAL,
+                                            )
+                                        }
                                     }
-                                }
-                            },
-                        )
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -1394,13 +1401,20 @@ private fun PageRail(
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
+    // D6 PHASE 2: thumbnail raster preview — a miniature of the page paper
+    // (template ruling drawn as vector lines/dots on the paper base) behind
+    // the title, so the rail reads as real page previews instead of blank
+    // boxes. Pure Compose, no bitmaps, no new deps.
+    val template = PaperTemplates.byId(page.templateId)
+    val paperBase = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+    else MaterialTheme.colorScheme.surface
+    val ruling = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(96.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                else MaterialTheme.colorScheme.surface)
+            .background(paperBase)
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) MaterialTheme.colorScheme.primary
@@ -1420,13 +1434,71 @@ private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> U
             ),
         contentAlignment = Alignment.BottomStart,
     ) {
-        Text(
-            page.title,
-            modifier = Modifier.padding(6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Canvas(Modifier.fillMaxSize()) {
+            when (template.type) {
+                com.vellum.notes.model.PageBackgroundType.RULED -> {
+                    var y = size.height * 0.18f
+                    val step = size.height / 6f
+                    while (y < size.height) {
+                        drawLine(ruling, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                        y += step
+                    }
+                    // Margin line.
+                    drawLine(ruling, Offset(size.width * 0.16f, 0f), Offset(size.width * 0.16f, size.height), strokeWidth = 1f)
+                }
+                com.vellum.notes.model.PageBackgroundType.GRID,
+                com.vellum.notes.model.PageBackgroundType.GRAPH,
+                com.vellum.notes.model.PageBackgroundType.SMALL_GRID -> {
+                    val step = size.width / 8f
+                    var x = step
+                    while (x < size.width) {
+                        drawLine(ruling, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                        x += step
+                    }
+                    var y = size.height / 6f
+                    val yStep = size.height / 6f
+                    while (y < size.height) {
+                        drawLine(ruling, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                        y += yStep
+                    }
+                }
+                com.vellum.notes.model.PageBackgroundType.DOTTED -> {
+                    val xStep = size.width / 8f
+                    val yStep = size.height / 6f
+                    var x = xStep
+                    while (x < size.width) {
+                        var y = yStep
+                        while (y < size.height) {
+                            drawCircle(ruling, radius = 1.5f, center = Offset(x, y))
+                            y += yStep
+                        }
+                        x += xStep
+                    }
+                }
+                else -> Unit
+            }
+        }
+        if (page.isPdfBacked) {
+            Text(
+                "PDF",
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // Bottom scrim behind the title for readability over the ruling.
+        Box(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+        ) {
+            Text(
+                page.title,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1964,7 +2036,6 @@ private fun CanvasTopBar(
             .semantics { isTraversalGroup = true; traversalIndex = 0f },
     ) {
         val compact = LocalConfiguration.current.screenWidthDp < 600
-        Text("TOOLBAR PROBE", Modifier.background(Color.Red))
         FixedToolbarContent(
             tool = tool,
             compact = compact,
@@ -2336,12 +2407,13 @@ private fun ToolButton(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { content() }
         }
         // Active tool indicator: 3dp accent underline (4dp spacing grid) using
-        // the contrast-audited theme tertiary (>= 4.5:1 on both themes).
+        // onPrimaryContainer (7.8:1 on the primaryContainer pill in dark theme,
+        // 10.5:1 in light) so the active state stays visible in both themes.
         Box(
             modifier = Modifier
                 .size(width = 24.dp, height = 3.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(if (selected) MaterialTheme.colorScheme.tertiary else Color.Transparent)
+                .background(if (selected) MaterialTheme.colorScheme.onPrimaryContainer else Color.Transparent)
         )
     }
 }
