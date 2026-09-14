@@ -280,7 +280,9 @@ class PalmRejectionEngine(
                 confidence = 0.8f,
                 reason = reason,
                 effectiveThresholdMm = 0f,
-                speedMmPerSec = 0f,
+                // SENT-M1: report the tracked pointer speed instead of a hardcoded
+                // 0f so consumers (velocity gates, diagnostics) see real motion.
+                speedMmPerSec = pointerStates[normalized.pointerId]?.speedMmPerSec ?: 0f,
                 durationMs = normalized.ageMs(nowNanos),
             )
         }
