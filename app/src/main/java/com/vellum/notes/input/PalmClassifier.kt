@@ -393,22 +393,31 @@ class PalmClassifier(
     private fun classifyValid(contact: NormalizedContact, ctx: ClassifyContext, confidence: Float): ClassificationResult {
         val fingerMax = settings.effectiveFingerMaxMm()
         val writingMax = settings.effectiveWritingMaxMm()
+        // SENT-C2: the palm band depends on the mode — RELAXED widens it to
+        // relaxedPalmMm. Hardcoding fingerMax here let an 18mm pressurized contact
+        // slip through the palm band in RELAXED mode.
+        val bandMax = if (ctx.mode == PalmRejectionMode.RELAXED) {
+            settings.effectiveRelaxedPalmMm()
+        } else {
+            fingerMax
+        }
         if ((ctx.mode == PalmRejectionMode.BALANCED || ctx.mode == PalmRejectionMode.RELAXED) &&
-            contact.maxDimMm > writingMax && contact.maxDimMm <= fingerMax &&
+            contact.maxDimMm > writingMax && contact.maxDimMm <= bandMax &&
             pressureConfirmedPalm(contact, contact.maxDimMm, ctx)
         ) {
-            return result(ContactClassification.PALM, 0.65f, ClassificationReason.PRESSURE_SATURATED, fingerMax, ctx)
+            return result(ContactClassification.PALM, 0.65f, ClassificationReason.PRESSURE_SATURATED, bandMax, ctx)
         }
         return if (ctx.mode == PalmRejectionMode.BALANCED || ctx.mode == PalmRejectionMode.RELAXED) {
             if (contact.maxDimMm <= writingMax) {
                 result(ContactClassification.WRITING, confidence, ClassificationReason.SMALL_CONTACT, writingMax, ctx)
-            } else if (contact.maxDimMm <= fingerMax) {
-                result(ContactClassification.FINGER, confidence, ClassificationReason.MEDIUM_CONTACT, fingerMax, ctx)
+            } else if (contact.maxDimMm <= bandMax) {
+                result(ContactClassification.FINGER, confidence, ClassificationReason.MEDIUM_CONTACT, bandMax, ctx)
             } else {
-                // Within the generous valid multiple but larger than a normal finger:
-                // a gesture finger, NEVER a writer. Returning WRITING here let a lone
-                // palm-sized contact draw after finger use seeded a large valid average.
-                result(ContactClassification.FINGER, confidence, ClassificationReason.MEDIUM_CONTACT, fingerMax, ctx)
+                // Within the generous valid multiple but larger than the mode's palm
+                // band: a palm, NEVER a writer or a gesture finger. (Previously this
+                // fell through as FINGER, so a lone palm-sized contact could drive
+                // gestures after finger use seeded a large valid average.)
+                result(ContactClassification.PALM, confidence, ClassificationReason.LARGE_CONTACT, bandMax, ctx)
             }
         } else {
             // STRICT/WRITING: only genuinely small contacts write. A contact within the
