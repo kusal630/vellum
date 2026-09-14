@@ -44,11 +44,21 @@ class DiagnosticsTouchView(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val input = MotionEventParser.parse(event) ?: return true
+        // PH-03: keep the viewport/edge context live on this path too — without it
+        // the resting-hand tracker's edge/cluster rules fall back to displayMaxPx.
+        engine.setViewportSize(width, height)
         val classified = engine.process(input)
         latestFrame = classified
         onFrame?.invoke(input, classified)
         invalidate()
         return true
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // PH-03: viewport size from the layout path so edge context is correct from
+        // the first frame, not only after the first touch lands.
+        engine.setViewportSize(w, h)
     }
 
     override fun onDraw(canvas: Canvas) {

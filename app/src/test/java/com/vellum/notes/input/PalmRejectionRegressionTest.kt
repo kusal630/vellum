@@ -546,6 +546,29 @@ class PalmRejectionRegressionTest {
         assertTrue(move.gesturePointerIds.isEmpty())
     }
 
+    // --- Cold-start with no size geometry: held as CANDIDATE, never immediate ink ---
+
+    @Test
+    fun coldStartNoGeometryDownIsCandidateNotWriting() {
+        val e = engine(PalmRejectionMode.WRITING)
+        fun noGeoContact(x: Float, y: Float, t: Long) =
+            TestTouchFactory.contact(0, x, y, t, majorPx = 0f, minorPx = 0f, pressure = 0.5f, size = 0f)
+        // A lone contact with no usable size on a fresh session must not claim the
+        // lock on DOWN — it is buffered until stroke-like motion confirms it.
+        val down = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(noGeoContact(200f, 200f, 0L)), added = 0)
+        )
+        assertNull("cold-start no-geometry DOWN must not claim the lock", down.activeWritingPointerId)
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
+
+        // Stroke-like motion (>=40px=4mm) promotes it to the writer.
+        val move = e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 10L, listOf(noGeoContact(280f, 220f, 10L)))
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
+    }
+
     // --- Mid-stroke palm join: ink must stay correct --------------------------------
 
     @Test

@@ -178,6 +178,18 @@ class PalmClassifier(
             // only/primary contact is accepted as writing; any secondary contact that lands
             // while the lock is active is still rejected as a palm.
             if (ctx.fingerWritingEnabled && ctx.mode == PalmRejectionMode.WRITING && ctx.pointerCount <= 1) {
+                // PH-01 cold-start hold: a lone contact with no size evidence must not
+                // emit ink on DOWN before motion confirms it — same CANDIDATE buffering
+                // as the cold-start path in classifySingle. (Size/pressure history can
+                // never seed on such devices, so every DOWN stays buffered until it moves.)
+                if (history.validSizes.isEmpty() && history.palmSizes.isEmpty()) {
+                    return ClassificationResult(
+                        ContactClassification.CANDIDATE,
+                        0.3f,
+                        ClassificationReason.CANDIDATE_BUFFER,
+                        0f,
+                    )
+                }
                 return result(ContactClassification.WRITING, 0.5f, ClassificationReason.FINGER_WRITING, 0f, ctx)
             }
             return result(ContactClassification.FINGER, 0.35f, ClassificationReason.NO_GEOMETRY_INFO, 0f, ctx)

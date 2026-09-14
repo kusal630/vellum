@@ -42,11 +42,16 @@ object MotionEventParser {
         }
 
         // Coalesced/historical samples: the OS batches several pointer positions into a
-        // single MOVE. Exposing them lets the stroke builder keep fast strokes smooth
+        // single event. Exposing them lets the stroke builder keep fast strokes smooth
         // instead of losing intermediate points. Historical frames are ordered oldest
-        // first and always precede the current [contacts].
+        // first and always precede the current [contacts]. MOVE carries the bulk of the
+        // batches, but the trailing UP/POINTER_UP event may also batch the final MOVE
+        // samples — those must reach the active stroke before it is finalized (PH-02:
+        // otherwise the stroke tail is cut at the last MOVE position).
         val history = ArrayList<RawTouchContact>()
-        if (action == InputAction.MOVE && event.historySize > 0) {
+        if ((action == InputAction.MOVE || action == InputAction.UP || action == InputAction.POINTER_UP) &&
+            event.historySize > 0
+        ) {
             for (h in 0 until event.historySize) {
                 val hTime = event.getHistoricalEventTime(h)
                 for (i in 0 until event.pointerCount) {

@@ -738,6 +738,14 @@ class InkCanvasView @JvmOverloads constructor(
         invalidate()
     }
 
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        // PH-03: layout without a size change (or after the engine is attached)
+        // never triggers onSizeChanged, leaving the viewport/edge context at 0.
+        // Re-sync here as well so edge/cluster rules always see the real viewport.
+        syncPalmZoneRect()
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         listener = null
@@ -950,6 +958,9 @@ class InkCanvasView @JvmOverloads constructor(
             com.vellum.notes.input.InputAction.POINTER_UP,
             -> {
                 if (input.liftedPointerId == writingPointerId) {
+                    // Capture before clearing: writingPointerId is reset below, so the
+                    // UP-batch history match must use the lifted id (PH-02).
+                    val liftedId: Int = input.liftedPointerId
                     val builder = strokeBuilder
                     strokeBuilder = null
                     writingPointerId = -1
@@ -959,7 +970,7 @@ class InkCanvasView @JvmOverloads constructor(
                         // the last few MOVE samples into the UP event and without them
                         // the stroke ends abruptly at the last MOVE position.
                         for (h in input.history) {
-                            if (h.pointerId == writingPointerId) {
+                            if (h.pointerId == liftedId) {
                                 val hx = screenToWorldX(h.x)
                                 val hy = screenToWorldY(h.y)
                                 b.onMove(hx, hy, h.eventTimeNanos)

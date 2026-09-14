@@ -116,7 +116,7 @@ class PalmClassifierTest {
     }
 
     @Test
-    fun noGeometrySingleContactIsWritingWithFingerWriting() {
+    fun noGeometrySingleContactHeldAsCandidateOnColdStart() {
         val ctx = PalmClassifier.ClassifyContext(
             mode = PalmRejectionMode.WRITING,
             fingerWritingEnabled = true,
@@ -127,8 +127,11 @@ class PalmClassifierTest {
             mode = PalmRejectionMode.WRITING,
             ctx = ctx,
         )
-        assertEquals(ContactClassification.WRITING, r.classification)
-        assertEquals(ClassificationReason.FINGER_WRITING, r.reason)
+        // PH-01: cold start with no size evidence must not emit ink on DOWN — the
+        // contact is buffered until velocity confirms it (same rule as the
+        // settings-threshold cold-start path).
+        assertEquals(ContactClassification.CANDIDATE, r.classification)
+        assertEquals(ClassificationReason.CANDIDATE_BUFFER, r.reason)
     }
 
     @Test
