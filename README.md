@@ -77,15 +77,14 @@ The model is not committed to the repository. Builds without it still succeed; t
 
 ## 🗺️ Roadmap
 
-## 🆕 What's New in v1.3.0
+## 🆕 What's New in v1.3.1 (Sentinel Bugfix Wave)
 
-- **Stability**: deferred bitmap recycle (no more recycled-bitmap crashes), clip-bounds fallback, safe `editorState` unwrapping
-- **Input pipeline**: flags (`FLAG_CANCELED`), edge flags, and stylus hover distance now flow through the parser into the engine — OS-detected palms are rejected immediately
-- **Performance**: `displayStrokes` allocation elimination, O(1) content-extent caching, zero-allocation hot draw path
-- **Accessibility**: TalkBack labels on toolbar buttons, 48dp touch targets, dark-mode contrast ≥4.5:1
-- **Syncthing sync**: conflict resolution UI (keep local / keep remote / merge), sync status indicator, exponential-backoff retry
-- **Polish**: floating toolbar, dark mode palette, palette rail
-- **Release**: ProGuard keep rules for palm engine / input models, reproducible F-Droid metadata, release-signed APK
+- **SENT-C1 Pointer Leak Fix**: cleared stale `pointerStates` entries on `UP/CANCEL` via `retainAll(activeIds)` to prevent velocity spikes and false palm classification on reused pointer IDs.
+- **SENT-C2 RELAXED Band-Max Fix**: resolved palm classification band-max by mode (`RELAXED` → `relaxedPalmMm`, `STRICT` → `fingerMax`) so pressurized contacts don't slip through.
+- **SENT-C3 NaN Division Guard**: guarded velocity, path, size, and growth divisors with `EPSILON (0.0001f)` to eliminate NaN scores and CPU spin.
+- **SENT-M1 Speed Routing**: sourced pipeline speed from `pointerStates` instead of hardcoded `0f` in fallback rejection.
+- **SENT-M2 Tool-Type Holdoff**: qualified writing holdoff lift strictly by tool type (only lifting for the specific writing tool, preventing resting palms).
+- **SENT-M3 Time Initialization**: initialized `lastMoveTimeNanos` to `-1L` and used explicit try-finally for touch session cleanup.
 
 - Auto shape recognition + handwriting alignment
 - Tags + full-text search (Room FTS)
