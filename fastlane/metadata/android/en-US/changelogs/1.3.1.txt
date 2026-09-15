@@ -1,0 +1,14 @@
+v1.3.1 — palm-rejection stability bugfix wave (Sentinel)
+
+- SENT-C1: clear stale pointer IDs on UP/CANCEL so reused pointer IDs cannot
+  spike velocity and trigger false palm classification mid-stroke.
+- SENT-C2: fix RELAXED mode palm band — pressurized contacts are now judged
+  against the relaxed palm threshold, not the finger maximum.
+- SENT-C3: guard score divisors (velocity, path, size, growth) with EPSILON
+  so division-by-zero no longer produces NaN scores and CPU spin.
+- SENT-M1: source disabled-pipeline speed from live pointer states instead of
+  a hardcoded zero, so the no-rejection fallback still reports meaningful speed.
+- SENT-M2: lift the writing holdoff only for the actual writing tool, not for
+  any finger-classed contact, so resting palms stay suppressed.
+- SENT-M3: initialize last-move time to -1 and clear is-new in a try-finally,
+  so cold-start and canceled sessions clean up deterministically.
