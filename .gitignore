@@ -26,3 +26,7 @@ app/src/main/assets/vosk/model/conf/
 app/src/main/assets/vosk/model/graph/
 app/src/main/assets/vosk/model/ivector/
 app/src/main/assets/vosk/model/README
+
+# CI-built APK artifacts — uploaded to GitHub releases (not committed directly).
+# The APK workflow produces these on every push to master.
+/artifacts/
