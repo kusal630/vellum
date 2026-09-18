@@ -40,6 +40,8 @@
 - [x] Toolbar with pen/highlighter/eraser/select/shapes/text/image/template/auto-erase tools
 - [x] Color palette (11-color) + pen width selection
 - [x] Smoothing mode selector
+- [x] Commit-time stroke thinning (RDP ε=0.05mm in StrokeBuilder.onUp)
+- [x] Predicted-tip ghost segment on the live stroke (StrokePredictor, 1 frame)
 - [x] Auto-erase (write/erase detection) toggle
 - [x] Page template picker per page
 - [x] Selection: lasso, move, resize (8 handles), duplicate, delete
@@ -69,6 +71,7 @@
 ## Phase 7 — Polish ✅ (partial)
 - [x] Settings screens (writing, gestures, appearance, storage, advanced)
 - [ ] Toolbar customization
+- [ ] Handwriting OCR search (on-device; acceptance: handwritten query found offline <300ms)
 - [ ] Dark mode polish, animations, accessibility
 - [ ] Performance passes (100/1k/10k strokes)
 

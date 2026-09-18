@@ -394,6 +394,12 @@ class InkCanvasView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
     }
     private var livePaintStyle: PenStyle? = null
+    /** Ghost-tip paint: translucent extension hiding ~1 frame of input latency. */
+    private val ghostPaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
     /**
      * Cached bottom edge of page content in world mm (scroll-bar extent). Recomputed
      * when the content lists change and extended incrementally on commit, so onDraw
@@ -1929,6 +1935,16 @@ class InkCanvasView @JvmOverloads constructor(
             // Use the style captured at stroke start: the live stroke must always match
             // what gets committed on pen-up, even if the toolbar changed mid-stroke.
             drawLiveStroke(canvas, pts, builder.style)
+            // Predicted tip: one translucent segment ahead of the last real sample.
+            // Replaced by real ink next frame; never committed.
+            builder.predictedTip()?.let { tip ->
+                val last = pts.last()
+                val st = builder.style
+                ghostPaint.color =
+                    (st.colorArgb and 0xFFFFFFL).toInt() or 0x59000000
+                ghostPaint.strokeWidth = st.widthMm.coerceAtLeast(0.2f)
+                canvas.drawLine(last.x, last.y, tip.x, tip.y, ghostPaint)
+            }
         }
         canvas.restore()
 

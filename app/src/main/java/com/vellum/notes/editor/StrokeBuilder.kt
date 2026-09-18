@@ -27,6 +27,8 @@ class StrokeBuilder(
     private var hasAnchor = false
     private var lastSampleX = 0f
     private var lastSampleY = 0f
+    private var lastSampleTimeNanos = 0L
+    private var lastSegmentDtNanos = 0L
 
     fun onDown(x: Float, y: Float) {
         smoother.reset()
@@ -34,6 +36,8 @@ class StrokeBuilder(
         hasAnchor = true
         lastSampleX = x
         lastSampleY = y
+        lastSampleTimeNanos = 0L
+        lastSegmentDtNanos = 0L
         anchorX = x
         anchorY = y
         points += Point(x, y)
@@ -47,6 +51,10 @@ class StrokeBuilder(
         if (!hasAnchor) return false
         // Dead zone: ignore movement smaller than the anchor tolerance (in mm).
         if (hypot(x - lastSampleX, y - lastSampleY) < deadZoneMm) return false
+        if (lastSampleTimeNanos > 0L && t > lastSampleTimeNanos) {
+            lastSegmentDtNanos = t - lastSampleTimeNanos
+        }
+        lastSampleTimeNanos = t
         lastSampleX = x
         lastSampleY = y
         val smoothed = smoother.process(x, y, t)
@@ -67,10 +75,14 @@ class StrokeBuilder(
         }
         hasAnchor = false
         if (points.size < 2) return null
+        // Commit-time thinning: RDP drops collinear samples the smoother added.
+        // Endpoints are preserved; these points were already shown live.
+        val thinned = StrokeResample.simplifyRdp(points, COMMIT_SIMPLIFY_EPSILON_MM)
+        val kept = if (thinned.size >= 2) thinned else points
         return Stroke(
             id = id,
             style = style,
-            pointsPacked = Stroke.pack(points),
+            pointsPacked = Stroke.pack(kept),
         )
     }
 
@@ -78,6 +90,21 @@ class StrokeBuilder(
         hasAnchor = false
         smoother.reset()
         points.clear()
+        lastSampleTimeNanos = 0L
+        lastSegmentDtNanos = 0L
+    }
+
+    /**
+     * Predicted live tip one frame ahead, for the translucent ghost segment
+     * that hides input→photon latency. Null until two live points with valid
+     * timing exist. Never affects the committed stroke.
+     */
+    fun predictedTip(horizonNanos: Long = 16_666_666L): Point? =
+        StrokePredictor.predictTipFor(points, lastSegmentDtNanos, horizonNanos)
+
+    companion object {
+        /** RDP epsilon at commit (world mm): kills collinear runs, keeps corners. */
+        const val COMMIT_SIMPLIFY_EPSILON_MM = 0.05f
     }
 
     /** Live point list for incremental rendering of the in-progress stroke. */

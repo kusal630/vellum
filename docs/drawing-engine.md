@@ -25,6 +25,12 @@ PageBackgroundRenderer
    this is the only per-event work, and it is cheap (a handful of segments).
 3. Dirty-rectangle invalidation limits `drawImage`/`Canvas` work to the bounding box of
    the changed region.
+4. The live stroke carries a predicted-tip ghost: `StrokeBuilder.predictedTip()`
+   extrapolates one frame ahead (velocity-clamped) and the view draws it as a
+   translucent segment. It hides ~1 frame of latency and is never committed.
+5. At pen-up, `StrokeBuilder` thins the stroke with RDP (ε=0.05mm,
+   `StrokeResample`) before packing: collinear runs from Catmull-Rom/fast
+   hardware collapse to endpoints, shrinking the database and the cached layer.
 
 ### Zoom strategy
 - Rendering is done in *world space*; the canvas applies a `scale`/`translate` transform.
