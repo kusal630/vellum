@@ -76,3 +76,23 @@ documentation (developer.android.com) — extracted verbatim points, condensed._
 - Calibration doodles to measure false-rejection rate for small/slow strokes.
 - Rolling per-device percentile normalization of geometry features to survive
   screen-protector / glove / moisture drift.
+
+## 6. 2026-09-18 wave: online research + synthesis (GoodNotes 6, Notability 15, Samsung Notes, ML Kit)
+
+- Competitors converge on: adjustable sensitivity + writing-posture modes
+  (GoodNotes), hover preview (Apple Pencil Pro), shape-hold straightening,
+  handwriting search, customizable toolbar (Notability 15). Vellum already
+  ships all but toolbar customization (added this wave) and ML-backed search.
+- ML Kit Digital Ink Recognition (Gboard tech, 300+ languages, ~100ms/line,
+  ~20MB model download) was evaluated and REJECTED for vellum: the download
+  and Google dependency violate the offline/no-vendor doctrine. The bundled
+  $1 recognizer was extended into page-level indexing (InkIndexer) instead —
+  zero deps, zero downloads, FTS-searchable today.
+- Hover suppression (S Pen hover + finger down) was engine-dead-code: touch
+  frames never carry the hovering pen. Fixed with an onHoverEvent-driven
+  latch in this wave; covered by replay fixtures.
+- Fuzz finding: unphysical size teleportation in synthetic streams can strand
+  WRITING on huge contacts; physical streams (stable size +/-10%, continuous
+  motion) hold the never-write invariant across 200 seeds x 30 frames.
+  Palm-growth cancel verified: EMA + hysteresis ride out spikes, then
+  PALM_GROWTH_CANCELLED releases the lock once settled.

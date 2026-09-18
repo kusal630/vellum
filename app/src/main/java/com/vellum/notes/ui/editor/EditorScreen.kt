@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -365,6 +366,7 @@ fun EditorScreen(
     val shapeKind by state.shapeKind.collectAsState()
     val selectedIds by state.selectedIds.collectAsState()
     val settings by settingsFlow.collectAsState(initial = PalmRejectionSettings())
+    val toolbarHidden by app.container.settingsRepository.toolbarHiddenFlow.collectAsState(initial = emptySet())
 
     // P0-1 writing-status chip state, driven by existing engine signals via InkCanvasView.
     var writingStatus by remember { mutableStateOf(WritingStatus.PEN_READY) }
@@ -945,6 +947,14 @@ fun EditorScreen(
                             app.container.settingsRepository.updateSettings {
                                 autoEraseEnabled = !autoEraseEnabled
                             }
+                        }
+                    },
+                    hiddenToolLabels = toolbarHidden,
+                    onToggleToolHidden = { label ->
+                        scope.launch {
+                            val next = toolbarHidden.toMutableSet()
+                            if (label in next) next.remove(label) else next.add(label)
+                            app.container.settingsRepository.setToolbarHidden(next)
                         }
                     },
                     onInsertText = { showTextDialog = true },
@@ -2487,6 +2497,8 @@ private fun CanvasTopBar(
     onSmoothingChange: (SmoothingMode) -> Unit,
     autoEraseEnabled: Boolean,
     onAutoEraseToggle: () -> Unit,
+    hiddenToolLabels: Set<String> = emptySet(),
+    onToggleToolHidden: (String) -> Unit = {},
     onInsertText: () -> Unit = {},
     onInsertImage: () -> Unit = {},
     onPickTemplate: () -> Unit = {},
@@ -2556,6 +2568,8 @@ private fun CanvasTopBar(
             onToggleTranscriptSidebar = onToggleTranscriptSidebar,
             classroomEnabled = classroomEnabled,
             autoEraseEnabled = autoEraseEnabled,
+            hiddenToolLabels = hiddenToolLabels,
+            onToggleToolHidden = onToggleToolHidden,
             onAutoEraseToggle = onAutoEraseToggle,
             onInsertText = onInsertText,
             onInsertImage = onInsertImage,
@@ -2619,6 +2633,8 @@ private fun FixedToolbarContent(
     onInsertImage: () -> Unit,
     onPickTemplate: () -> Unit,
     stripClick: (Tool) -> Unit,
+    hiddenToolLabels: Set<String> = emptySet(),
+    onToggleToolHidden: (String) -> Unit = {},
     classroomUnlocked: Boolean = false,
     pdfUnlocked: Boolean = false,
     gestureUnlocked: Boolean = false,
@@ -2658,10 +2674,14 @@ private fun FixedToolbarContent(
             { Icon(Icons.Filled.AutoFixHigh, contentDescription = "Auto-erase") }),
     )
     // P0-2 fixed toolbar: no horizontal scroll under 600dp — 8 tools in the row,
-    // the rest into the More overflow menu.
-    val visibleTools = if (compact) allTools.take(8) else allTools
-    val overflowTools = if (compact) allTools.drop(8) else emptyList()
+    // Hidden tools are excluded everywhere except the customize dialog;
+    // an all-hidden selection falls back to the full row (never an empty bar).
+    val customized = allTools.filter { it.label !in hiddenToolLabels }
+    val effectiveTools = if (customized.isEmpty()) allTools else customized
+    val visibleTools = if (compact) effectiveTools.take(8) else effectiveTools
+    val overflowTools = if (compact) effectiveTools.drop(8) else emptyList()
     var overflowOpen by remember { mutableStateOf(false) }
+    var customizeOpen by remember { mutableStateOf(false) }
     // Floating pills hovering over the canvas: navigation, tools, actions.
     // Every target is 48dp with an explicit contentDescription. No horizontal scroll.
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
@@ -2745,34 +2765,74 @@ private fun FixedToolbarContent(
                             content = t.icon,
                         )
                     }
-                    if (overflowTools.isNotEmpty()) {
-                        // More overflow menu: the rest of the tools under 600dp.
-                        Box {
-                            IconButton(
-                                onClick = { overflowOpen = true },
-                                modifier = Modifier.size(48.dp).semantics {
-                                    contentDescription = "More tools overflow menu"
-                                    stateDescription = if (overflowOpen) "Overflow expanded" else "Overflow collapsed"
-                                },
-                            ) {
-                                Icon(
-                                    Icons.Filled.MoreVert,
-                                    contentDescription = "More overflow menu",
-                                    tint = MaterialTheme.colorScheme.onSurface,
+                    // More menu hosts overflow tools plus toolbar customization,
+                    // so it is always present even when nothing overflows.
+                    Box {
+                        IconButton(
+                            onClick = { overflowOpen = true },
+                            modifier = Modifier.size(48.dp).semantics {
+                                contentDescription = "More tools overflow menu"
+                                stateDescription = if (overflowOpen) "Overflow expanded" else "Overflow collapsed"
+                            },
+                        ) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "More overflow menu",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = overflowOpen,
+                            onDismissRequest = { overflowOpen = false },
+                        ) {
+                            overflowTools.forEach { t ->
+                                DropdownMenuItem(
+                                    text = { Text(t.label) },
+                                    onClick = { overflowOpen = false; t.apply() },
                                 )
                             }
-                            DropdownMenu(
-                                expanded = overflowOpen,
-                                onDismissRequest = { overflowOpen = false },
-                            ) {
-                                overflowTools.forEach { t ->
-                                    DropdownMenuItem(
-                                        text = { Text(t.label) },
-                                        onClick = { overflowOpen = false; t.apply() },
-                                    )
-                                }
-                            }
+                            DropdownMenuItem(
+                                text = { Text("Customize toolbar") },
+                                onClick = { overflowOpen = false; customizeOpen = true },
+                            )
                         }
+                    }
+                    if (customizeOpen) {
+                        AlertDialog(
+                            onDismissRequest = { customizeOpen = false },
+                            title = { Text("Customize toolbar") },
+                            text = {
+                                Column {
+                                    allTools.forEach { t ->
+                                        val visibleCount = allTools.count { it.label !in hiddenToolLabels }
+                                        val checked = t.label !in hiddenToolLabels
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth().clickable(
+                                                role = Role.Checkbox,
+                                                onClickLabel = if (checked) "Hide ${t.label}" else "Show ${t.label}",
+                                            ) {
+                                                if (checked && visibleCount > 1) onToggleToolHidden(t.label)
+                                                else if (!checked) onToggleToolHidden(t.label)
+                                            },
+                                        ) {
+                                            Checkbox(
+                                                checked = checked,
+                                                enabled = checked && visibleCount > 1 || !checked,
+                                                onCheckedChange = null,
+                                                modifier = Modifier.semantics {
+                                                    contentDescription = "${t.label} tool visible"
+                                                },
+                                            )
+                                            Text(t.label)
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { customizeOpen = false }) { Text("Done") }
+                            },
+                        )
                     }
                 }
             }

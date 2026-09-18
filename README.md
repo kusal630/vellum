@@ -17,13 +17,13 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 |---|---|
 | ✍️ Handwriting | Low-latency ink (predicted-tip ghost), pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup, RDP-thinned stroke storage |
 | 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), Low/Med/High sensitivity presets, saturated-pressure palm confirmation, per-device calibration + Labs screen. Acceptance-tested: palm-first, mid-stroke palm, no-palm, and continued writing all keep inking |
-| 🧰 Toolbar | Floating pills up top (navigate/undo, tools, page actions), tap the active pen for colors & thickness, left color rail with quick dots + full palette — never under the palm |
+| 🧰 Toolbar | Floating pills up top (navigate/undo, tools, page actions), tap the active pen for colors & thickness, left color rail with quick dots + full palette, customizable tool row (More → Customize toolbar) — never under the palm |
 | 🔤 Text & images | Text boxes (insert + edit), photo insertion, move / resize / duplicate |
 | 🔷 Shapes | Line, arrow, rect, circle, ellipse, triangle, star, hexagon — select, move, resize |
 | 📄 Pages | Multi-page notebooks, page rail, long-press **duplicate / delete**, templates per notebook + per page |
 | 📚 Paper | 11 templates (ruled, grid, dotted, graph, Cornell, music, math…), 10 premium covers incl. Aurum Gold |
 | 🕘 History | Page snapshots on close + on demand (deduped, newest 20 kept), restore with pre-restore safety snapshot, per-page history from the page rail |
-| 🔍 Organize | Noteshelf home (sidebar + categories, Starred/Unfiled/Trash/Archived), tags with filter chips, full-text search over titles/typed text/transcripts/summaries, Quick Note, Recent / A–Z sort |
+| 🔍 Organize | Noteshelf home (sidebar + categories, Starred/Unfiled/Trash/Archived), tags with filter chips, full-text search over titles/typed text/transcripts/summaries/recognized handwriting, Quick Note, Recent / A–Z sort |
 | 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud. Passphrase-encrypted backups (AES-256-GCM) + in-app restore with safety copy; the passphrase is never stored |
 | 🔄 Sync | Device sync via your Syncthing folder: versioned snapshots (plain/encrypted) with manifests, explicit newest-wins import with safety copy — no accounts, no servers |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |

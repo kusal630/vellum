@@ -78,11 +78,29 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val IMMEDIATE_DRAW_ISOLATED_KEY = booleanPreferencesKey("immediate_draw_isolated")
         private val WRITING_POSTURE_KEY = intPreferencesKey("writing_posture")
         private val PRESSURE_ASSIST_KEY = booleanPreferencesKey("pressure_assist")
+        private val TOOLBAR_HIDDEN_KEY = stringPreferencesKey("toolbar_hidden_tools")
     }
 
     val settingsFlow: Flow<PalmRejectionSettings> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs -> prefsToSettings(prefs) }
+
+    /** Labels hidden from the toolbar row by user customization. Empty = all visible. */
+    val toolbarHiddenFlow: Flow<Set<String>> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { prefs ->
+            prefs[TOOLBAR_HIDDEN_KEY]
+                ?.split(",")
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet() ?: emptySet()
+        }
+
+    suspend fun setToolbarHidden(labels: Set<String>) {
+        dataStore.edit { prefs ->
+            prefs[TOOLBAR_HIDDEN_KEY] = labels.joinToString(",")
+        }
+    }
 
     /** Applies [block] to the current settings and persists the result atomically. */
     suspend fun updateSettings(block: PalmRejectionSettings.() -> Unit) {

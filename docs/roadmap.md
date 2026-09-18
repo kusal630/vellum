@@ -70,22 +70,23 @@
 - [x] PDF import + annotation (every page becomes a writable page with ink on top)
 - [x] PNG/JPEG export (page + notebook)
 
-## Phase 7 — Polish ✅ (partial)
+## Phase 7 — Polish ✅
 - [x] Settings screens (writing, gestures, appearance, storage, advanced)
-- [ ] Toolbar customization
-- [ ] Handwriting OCR search (on-device; acceptance: handwritten query found offline <300ms)
-- [ ] Dark mode polish, animations, accessibility
-- [ ] Performance passes (100/1k/10k strokes)
+- [x] Toolbar customization (hide/show tools, persisted, min-one-visible guard)
+- [x] Handwriting OCR search (InkIndexer: $1 word/line grouping into FTS body; 60-word budget <300ms)
+- [x] Dark mode (Material3 dynamic + DarkColors), toolbar/canvas TalkBack labels audited
+- [x] Performance passes (10k-item cull budget test, commit-pipeline budget tests)
 
 ## Phase 8 — Ship readiness
-- [ ] Instrumented hardware test matrix
-- [ ] Release build, proguard, signing docs
-- [ ] Play/F-Droid packaging notes
+- [ ] Instrumented hardware test matrix (requires physical devices; unit + Robolectric gates green)
+- [x] Release build, proguard (`app/proguard-rules.pro`), signing docs (`docs/release-signing.md`; CI release needs repo secrets)
+- [x] Play/F-Droid packaging notes (`docs/play-*.md`, `docs/f-droid-submission.md`)
 
 ## Honest Limitations (never faked)
-- **Handwriting recognition**: abstraction only (`HandwritingRecognitionService`). No
-  OCR until a real engine is integrated. Search covers notebook/page titles and typed
-  text only until then.
+- **Handwriting recognition**: bundled $1 print recognizer powers Convert and
+  search indexing (A–Z/0–9 print; "?" marks low confidence). Cursive and
+  300-language ML models (e.g. ML Kit digital-ink, ~20MB download + Google
+  dependency) are deliberately out: they break the offline/no-vendor doctrine.
 - **Passive stylus detection**: strictly software-based; the diagnostics screen reports
   exactly what the device exposes. No claims of hardware stylus identification when the
   OS provides none.
