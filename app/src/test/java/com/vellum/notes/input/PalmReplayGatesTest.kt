@@ -1,5 +1,6 @@
 package com.vellum.notes.input
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -135,5 +136,117 @@ class PalmReplayGatesTest {
         }
         val frr = falseRejects.toDouble() / total
         assertTrue("FRR $frr ($falseRejects/$total) exceeds gate $FRR_GATE", frr <= FRR_GATE)
+    }
+
+    @Test
+    fun externalHoverLatch_suppressesFingerWhilePenPoised() {
+        val e = engine()
+        e.setStylusHovering(true)
+        val finger = TestTouchFactory.fingertip(pointerId = 1, x = 300f, y = 300f, timeMs = 0L)
+        val down = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(finger), added = 1),
+        )
+        assertTrue(
+            "finger must not write while stylus hovers, got ${down.contactFor(1)?.classification}",
+            down.contactFor(1)?.classification != ContactClassification.WRITING,
+        )
+    }
+
+    @Test
+    fun externalHoverLatch_released_returnsToNormalPath() {
+        val e = engine()
+        e.setStylusHovering(true)
+        e.setStylusHovering(false)
+        val finger = TestTouchFactory.fingertip(pointerId = 1, x = 300f, y = 300f, timeMs = 0L)
+        val down = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(finger), added = 1),
+        )
+        assertTrue(
+            "released latch must not suppress, got ${down.contactFor(1)?.classification}",
+            down.contactFor(1)?.classification != ContactClassification.PALM,
+        )
+    }
+
+    @Test
+    fun leftHandMirror_penWrites_palmRejected() {
+        val e = engine()
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L, listOf(palm(2, 100f, 700f, 0L)), added = 2,
+            ),
+        )
+        val penDown = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 10L,
+                listOf(palm(2, 100f, 700f, 0L), pen(0, 450f, 200f, 10L)), added = 0,
+            ),
+        )
+        assertEquals(ContactClassification.WRITING, penDown.contactFor(0)?.classification)
+        assertEquals(ContactClassification.PALM, penDown.contactFor(2)?.classification)
+    }
+
+    @Test
+    fun edgeGripPalm_rejected() {
+        val e = engine()
+        val down = e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L, listOf(palm(2, 8f, 400f, 0L)), added = 2,
+            ),
+        )
+        assertTrue(
+            "edge palm wrote: ${down.contactFor(2)?.classification}",
+            down.contactFor(2)?.classification != ContactClassification.WRITING,
+        )
+    }
+
+    @Test
+    fun stylusHover_fingerSuppressed() {
+        val e = engine()
+        val hoverStylus = TestTouchFactory.contact(
+            pointerId = 9, x = 310f, y = 290f, timeMs = 0L,
+            majorPx = 8f, minorPx = 8f, pressure = 0f,
+            toolType = TestTouchFactory.TOOL_STYLUS,
+        ).copy(hoverDistance = 5f)
+        val finger = TestTouchFactory.fingertip(pointerId = 1, x = 300f, y = 300f, timeMs = 0L)
+        val down = e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L, listOf(hoverStylus, finger), added = 1,
+            ),
+        )
+        assertTrue(
+            "hover-suppressed finger wrote: ${down.contactFor(1)?.classification}",
+            down.contactFor(1)?.classification != ContactClassification.WRITING,
+        )
+    }
+
+    @Test
+    fun secondFingerJoiningMidStroke_doesNotStealStroke() {
+        val e = engine()
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L, listOf(pen(0, 200f, 200f, 0L)), added = 0,
+            ),
+        )
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 10L, listOf(pen(0, 240f, 220f, 10L)),
+            ),
+        )
+        val join = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(
+                    pen(0, 240f, 220f, 10L),
+                    TestTouchFactory.fingertip(pointerId = 1, x = 500f, y = 500f, timeMs = 20L),
+                ),
+                added = 1,
+            ),
+        )
+        assertEquals(ContactClassification.WRITING, join.contactFor(0)?.classification)
+        assertEquals(0, join.activeWritingPointerId)
+        assertTrue(
+            "joining finger must not write, got ${join.contactFor(1)?.classification}",
+            join.contactFor(1)?.classification != ContactClassification.WRITING,
+        )
     }
 }

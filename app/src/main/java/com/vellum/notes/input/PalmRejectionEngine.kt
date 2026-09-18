@@ -30,6 +30,17 @@ class PalmRejectionEngine(
     private val restingTracker = RestingHandTracker(capabilities)
 
     /**
+     * Latched by the view from hover events: true while a stylus hovers without
+     * touching. Touch frames never carry the hovering pen, so without this latch
+     * the hover gate below would only fire for batched edge cases.
+     */
+    private var externalStylusHover = false
+
+    fun setStylusHovering(hovering: Boolean) {
+        externalStylusHover = hovering
+    }
+
+    /**
      * Cold-start CANDIDATE tracked for a potential claim on the next MOVE. The
      * size classifier buffers a lone cold-start contact as CANDIDATE on DOWN
      * (never WRITING, so [manageWritingLock] cannot claim it there); it is
@@ -130,13 +141,14 @@ class PalmRejectionEngine(
             // A finger pair is a pan/zoom candidate that must never be hover-suppressed.
             // Exempt two-finger gestures so pan/zoom still works while the pen hovers.
             val isGestureCandidate = frame.contacts.count { it.toolTypeRaw == MotionEvent.TOOL_TYPE_FINGER } >= 2
-            val hoverSuppressed = currentSettings.palmRejectionEnabled &&
-                contact.toolType == ToolKind.FINGER && lock.activePointerId != contact.pointerId &&
-                !isGestureCandidate &&
+            val stylusHovering = externalStylusHover ||
                 frame.contacts.any { other ->
                     other.toolTypeRaw == TOOL_TYPE_STYLUS &&
                         other.hoverDistance != null && other.hoverDistance > 0f
                 }
+            val hoverSuppressed = currentSettings.palmRejectionEnabled &&
+                contact.toolType == ToolKind.FINGER && lock.activePointerId != contact.pointerId &&
+                !isGestureCandidate && stylusHovering
             if (hoverSuppressed) {
                 val c = ClassifiedContact(
                     contact = contact,

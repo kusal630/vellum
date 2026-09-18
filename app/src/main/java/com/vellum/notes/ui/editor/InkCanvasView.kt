@@ -566,6 +566,19 @@ class InkCanvasView @JvmOverloads constructor(
     fun screenToWorldX(sx: Float) = (sx - offsetX) / scale
     fun screenToWorldY(sy: Float) = (sy - offsetY) / scale
 
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        if (::engine.isInitialized) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE ->
+                    if (event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS) {
+                        engine.setStylusHovering(true)
+                    }
+                MotionEvent.ACTION_HOVER_EXIT -> engine.setStylusHovering(false)
+            }
+        }
+        return super.onHoverEvent(event)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // Nebo-style double-tap with two fingers = undo. Detected on the raw
         // touch path (before palm rejection) so it works regardless of how the

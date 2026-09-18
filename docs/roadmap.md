@@ -42,6 +42,8 @@
 - [x] Smoothing mode selector
 - [x] Commit-time stroke thinning (RDP ε=0.05mm in StrokeBuilder.onUp)
 - [x] Predicted-tip ghost segment on the live stroke (StrokePredictor, 1 frame)
+- [x] Stylus hover latch: view feeds onHoverEvent into the engine hover gate
+- [x] FAR/FRR-gated replay battery + left-hand/edge/hover/pinch fixtures
 - [x] Auto-erase (write/erase detection) toggle
 - [x] Page template picker per page
 - [x] Selection: lasso, move, resize (8 handles), duplicate, delete
