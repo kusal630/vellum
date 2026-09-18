@@ -21,6 +21,10 @@ jobs:
           java-version: 17
           cache: gradle
       - uses: android-actions/setup-android@v3
+        with:
+          # Action default ("tools platform-tools") installs the long-removed
+          # "tools" package and fails the step; platform-tools ships preinstalled.
+          packages: platform-tools
       - name: Gradle wrapper sanity
         run: ./gradlew -v
       - name: Assemble debug APK
@@ -47,6 +51,8 @@ jobs:
           java-version: 17
           cache: gradle
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Assemble release APK
         env:
           VELLUM_STORE_FILE: ${{ secrets.VELLUM_STORE_FILE }}
