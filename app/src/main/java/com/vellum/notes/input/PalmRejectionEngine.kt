@@ -536,7 +536,16 @@ class PalmRejectionEngine(
                                 val locked = classified.firstOrNull { it.contact.pointerId == lock.activePointerId }
                                 val lockedDim = locked?.contact?.maxDimMm ?: 0f
                                 val addedDim = added.contact.maxDimMm
-                                val addedIsConfirmedWriter = added.classification == ContactClassification.WRITING
+                                // Only a hardware pen/eraser is a CONFIRMED writer. A
+                                // finger-sized WRITING contact is a passive-pen guess:
+                                // handing the lock to a second such contact strands
+                                // two fingers in ink mode forever and two-finger pan
+                                // can never start while a palm rests.
+                                val addedIsHardwareWriter =
+                                    (added.contact.toolType == ToolKind.STYLUS ||
+                                        added.contact.toolType == ToolKind.ERASER)
+                                val addedIsConfirmedWriter = added.classification == ContactClassification.WRITING &&
+                                    addedIsHardwareWriter
                                 val addedClearlySmaller = lockedDim > 0f && addedDim > 0f &&
                                     lockedDim / addedDim >= PalmClassifier.PALM_HANDOFF_RATIO
                                 val handOff = addedIsConfirmedWriter ||

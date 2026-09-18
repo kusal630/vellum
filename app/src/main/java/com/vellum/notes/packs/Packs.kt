@@ -21,10 +21,17 @@ data class PackEntitlements(
     val pdfPack: Boolean = false,
     val gesturePack: Boolean = false,
 ) {
-    fun isUnlocked(pack: PackId): Boolean = when (pack) {
-        PackId.CLASSROOM -> classroomPack
-        PackId.PDF -> pdfPack
-        PackId.GESTURE -> gesturePack
+    fun isUnlocked(pack: PackId): Boolean =
+        // Paywalls removed for now: every pack reads unlocked. Flip back to
+        // per-pack flags when billing returns.
+        if (PAYWALLS_DISABLED) true else when (pack) {
+            PackId.CLASSROOM -> classroomPack
+            PackId.PDF -> pdfPack
+            PackId.GESTURE -> gesturePack
+        }
+
+    companion object {
+        const val PAYWALLS_DISABLED = true
     }
 
     fun withUnlocked(pack: PackId, unlocked: Boolean = true): PackEntitlements = when (pack) {

@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.Intent
@@ -335,7 +338,7 @@ fun SettingsContent(
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
     Column(Modifier.padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
-        SettingsSectionTitle("1 · Writing feel")
+        SettingsCard("1 · Writing feel") {
 
         SettingSwitchRow(
             title = "Finger writing",
@@ -391,8 +394,8 @@ fun SettingsContent(
             onCheckedChange = { onSettingChange(settings.copy(pressureAssistEnabled = it)) },
         )
 
-        SettingsSectionDivider()
-        SettingsSectionTitle("2 · Palm rejection")
+        }
+        SettingsCard("2 · Palm rejection") {
 
         SettingSwitchRow(
             title = "Palm rejection",
@@ -540,8 +543,8 @@ fun SettingsContent(
             )
         }
 
-        SettingsSectionDivider()
-        SettingsSectionTitle("3 · Handwriting")
+        }
+        SettingsCard("3 · Handwriting") {
 
         SettingSwitchRow(
             title = "Auto-convert handwriting to text (Coming soon)",
@@ -576,8 +579,8 @@ fun SettingsContent(
             }
         }
 
-        SettingsSectionDivider()
-        SettingsSectionTitle("4 · Advanced")
+        }
+        SettingsCard("4 · Advanced") {
 
         Text(
             "Fine-tune every raw mm/ms cutoff. The presets in §1–§3 write these same values.",
@@ -786,19 +789,20 @@ fun SettingsContent(
                 }
             }
         }
-
-        SettingsSectionDivider()
-        com.vellum.notes.packs.ui.PacksCardGrid(
-            entitlements = packEntitlements,
-            onPackClick = onPackClick,
-        )
-        SettingsSectionDivider()
-        SettingsSectionTitle("Device Sync")
-        SyncSection(
-            syncRepository = syncRepository,
-            notesRepository = notesRepository,
-        )
-        SettingsSectionDivider()
+        }
+        if (!com.vellum.notes.packs.PackEntitlements.PAYWALLS_DISABLED) {
+            com.vellum.notes.packs.ui.PacksCardGrid(
+                entitlements = packEntitlements,
+                onPackClick = onPackClick,
+            )
+            SettingsSectionDivider()
+        }
+        SettingsCard("Device Sync") {
+            SyncSection(
+                syncRepository = syncRepository,
+                notesRepository = notesRepository,
+            )
+        }
         SupportSection()
     }
 }
@@ -961,6 +965,26 @@ private fun modeHelp(mode: PalmRejectionMode): String = when (mode) {
 @Composable
 private fun SettingsSectionTitle(title: String) {
     Text(title, style = MaterialTheme.typography.titleLarge)
+    Spacer(Modifier.height(16.dp))
+}
+
+@Composable
+private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
+    }
     Spacer(Modifier.height(16.dp))
 }
 

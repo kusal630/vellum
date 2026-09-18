@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Summarize
@@ -70,9 +71,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -405,6 +408,27 @@ fun EditorScreen(
         chapters = packRepository.getChapters(pageId)
     }
     var playbackMs by remember { mutableStateOf(0L) }
+    val inkReplayRange = remember(content.strokes) {
+        com.vellum.notes.editor.StrokeReplay.replayRange(content.strokes)
+    }
+    var inkReplayCutoff by remember(pageId) { mutableStateOf<Long?>(null) }
+    var inkReplaying by remember(pageId) { mutableStateOf(false) }
+    var zoomWindowOn by rememberSaveable(pageId) { mutableStateOf(false) }
+    LaunchedEffect(inkReplaying, pageId) {
+        if (!inkReplaying) return@LaunchedEffect
+        val range = inkReplayRange ?: run { inkReplaying = false; return@LaunchedEffect }
+        val stepMs = ((range.second - range.first) / 100).coerceAtLeast(1L)
+        while (inkReplaying) {
+            kotlinx.coroutines.delay(100)
+            val next = (inkReplayCutoff ?: range.first) + stepMs
+            if (next >= range.second) {
+                inkReplayCutoff = null
+                inkReplaying = false
+                break
+            }
+            inkReplayCutoff = next
+        }
+    }
     val autoBackup by packRepository.autoBackupEnabled.collectAsState(initial = false)
 
     // --- Gesture/Bookmark Pack: bookmarks + custom gesture mapping. ---
@@ -619,11 +643,38 @@ fun EditorScreen(
 
     // ---- Page template picker ----
     if (showTemplateDialog) {
+        val isDarkPaper = (currentSummary?.background?.colorArgb ?: 0xFFFFFFFFL) != 0xFFFFFFFFL
         AlertDialog(
             onDismissRequest = { showTemplateDialog = false },
             title = { Text("Page template") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = !isDarkPaper,
+                            onClick = {
+                                vm.setPageBackground(
+                                    PaperTemplates.backgroundFor(currentSummary?.templateId, darkTheme = false),
+                                )
+                                vm.refreshContent()
+                            },
+                            label = { Text("White paper") },
+                        )
+                        FilterChip(
+                            selected = isDarkPaper,
+                            onClick = {
+                                vm.setPageBackground(
+                                    PaperTemplates.backgroundFor(currentSummary?.templateId, darkTheme = true),
+                                )
+                                vm.refreshContent()
+                            },
+                            label = { Text("Dark paper") },
+                        )
+                    }
                     PaperTemplates.ALL.forEach { t ->
                         val templateSelected = currentSummary?.templateId == t.id
                         Row(
@@ -957,6 +1008,8 @@ fun EditorScreen(
                             app.container.settingsRepository.setToolbarHidden(next)
                         }
                     },
+                    zoomWindowEnabled = zoomWindowOn,
+                    onToggleZoomWindow = { zoomWindowOn = !zoomWindowOn },
                     onInsertText = { showTextDialog = true },
                     onInsertImage = {
                         imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -1046,6 +1099,8 @@ fun EditorScreen(
                                 view.listener = vm.canvasListener
                                 view.onWritingStatusChanged = { writingStatus = it }
                                 view.autoEraseEnabled = settings.autoEraseEnabled
+                                view.replayCutoffMs = inkReplayCutoff
+                                view.zoomWindowEnabled = zoomWindowOn
                                 view.scribbleSensitivity = settings.scribbleSensitivity
                                 view.debugOverlayEnabled = settings.debugOverlayEnabled
                                 // Palm rest zone + scroll bar.
@@ -1230,6 +1285,22 @@ fun EditorScreen(
                         },
                         onLockedPack = { unlockPack = it },
                         modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).fillMaxHeight(),
+                        inkReplayRange = inkReplayRange,
+                        inkReplayCutoff = inkReplayCutoff,
+                        inkReplaying = inkReplaying,
+                        onReplayPlay = {
+                            val range = inkReplayRange ?: return@ClassroomSidebar
+                            inkReplayCutoff = range.first
+                            inkReplaying = true
+                        },
+                        onReplayStop = {
+                            inkReplaying = false
+                            inkReplayCutoff = null
+                        },
+                        onReplaySeek = {
+                            inkReplaying = false
+                            inkReplayCutoff = it
+                        },
                     )
                 }
             }
@@ -1335,6 +1406,12 @@ private fun ClassroomSidebar(
     onToggleAutoBackup: (Boolean) -> Unit = {},
     onShareExport: () -> Unit = {},
     onLockedPack: (com.vellum.notes.packs.PackId) -> Unit = {},
+    inkReplayRange: Pair<Long, Long>? = null,
+    inkReplayCutoff: Long? = null,
+    inkReplaying: Boolean = false,
+    onReplayPlay: () -> Unit = {},
+    onReplayStop: () -> Unit = {},
+    onReplaySeek: (Long) -> Unit = {},
 ) {
     var tab by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
@@ -1384,10 +1461,10 @@ private fun ClassroomSidebar(
             }
             Spacer(Modifier.height(8.dp))
 
-            // Tabs: Transcript | Summary | Chapters (pack) | Export (pack).
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SidebarTab(label = "Transcript", selected = tab == 0, onClick = { tab = 0 }, modifier = Modifier.weight(1f))
                 SidebarTab(label = "Summary", selected = tab == 1, onClick = { tab = 1 }, modifier = Modifier.weight(1f))
+                SidebarTab(label = "Replay", selected = tab == 4, onClick = { tab = 4 }, modifier = Modifier.weight(1f))
             }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1566,6 +1643,42 @@ private fun ClassroomSidebar(
                                 checked = autoBackupEnabled,
                                 onCheckedChange = onToggleAutoBackup,
                             )
+                        }
+                    }
+                }
+                4 -> {
+                    if (inkReplayRange == null) {
+                        Text(
+                            "No timestamped ink yet. New strokes are recorded " +
+                                "with commit times — replay them here stroke by stroke.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        val (replayMin, replayMax) = inkReplayRange
+                        val span = (replayMax - replayMin).coerceAtLeast(1L)
+                        val progress = ((inkReplayCutoff ?: replayMax) - replayMin).toFloat() / span.toFloat()
+                        Text(
+                            "Watch this page redraw itself in commit order.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Slider(
+                            value = progress.coerceIn(0f, 1f),
+                            onValueChange = { onReplaySeek(replayMin + (it * span).toLong()) },
+                            modifier = Modifier.fillMaxWidth().semantics {
+                                contentDescription = "Ink replay position"
+                            },
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { if (inkReplaying) onReplayStop() else onReplayPlay() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (inkReplaying) "Stop replay" else "Replay ink")
                         }
                     }
                 }
@@ -2499,6 +2612,8 @@ private fun CanvasTopBar(
     onAutoEraseToggle: () -> Unit,
     hiddenToolLabels: Set<String> = emptySet(),
     onToggleToolHidden: (String) -> Unit = {},
+    zoomWindowEnabled: Boolean = false,
+    onToggleZoomWindow: () -> Unit = {},
     onInsertText: () -> Unit = {},
     onInsertImage: () -> Unit = {},
     onPickTemplate: () -> Unit = {},
@@ -2570,6 +2685,8 @@ private fun CanvasTopBar(
             autoEraseEnabled = autoEraseEnabled,
             hiddenToolLabels = hiddenToolLabels,
             onToggleToolHidden = onToggleToolHidden,
+            zoomWindowEnabled = zoomWindowEnabled,
+            onToggleZoomWindow = onToggleZoomWindow,
             onAutoEraseToggle = onAutoEraseToggle,
             onInsertText = onInsertText,
             onInsertImage = onInsertImage,
@@ -2635,6 +2752,8 @@ private fun FixedToolbarContent(
     stripClick: (Tool) -> Unit,
     hiddenToolLabels: Set<String> = emptySet(),
     onToggleToolHidden: (String) -> Unit = {},
+    zoomWindowEnabled: Boolean = false,
+    onToggleZoomWindow: () -> Unit = {},
     classroomUnlocked: Boolean = false,
     pdfUnlocked: Boolean = false,
     gestureUnlocked: Boolean = false,
@@ -2794,6 +2913,10 @@ private fun FixedToolbarContent(
                             DropdownMenuItem(
                                 text = { Text("Customize toolbar") },
                                 onClick = { overflowOpen = false; customizeOpen = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (zoomWindowEnabled) "✓ Zoom writing aid" else "Zoom writing aid") },
+                                onClick = { overflowOpen = false; onToggleZoomWindow() },
                             )
                         }
                     }

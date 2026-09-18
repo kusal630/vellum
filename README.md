@@ -15,8 +15,8 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 
 | Area | What you get |
 |---|---|
-| ✍️ Handwriting | Low-latency ink (predicted-tip ghost), pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup, RDP-thinned stroke storage |
-| 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), Low/Med/High sensitivity presets, saturated-pressure palm confirmation, per-device calibration + Labs screen. Acceptance-tested: palm-first, mid-stroke palm, no-palm, and continued writing all keep inking |
+| ✍️ Handwriting | Low-latency ink (predicted-tip ghost), pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup, RDP-thinned stroke storage, ink replay, zoom writing aid |
+| 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), Low/Med/High sensitivity presets, saturated-pressure palm confirmation, stylus-hover gating, two-finger pan that works with a palm down, per-device calibration + Labs screen. Acceptance-tested: palm-first, mid-stroke palm, no-palm, and continued writing all keep inking |
 | 🧰 Toolbar | Floating pills up top (navigate/undo, tools, page actions), tap the active pen for colors & thickness, left color rail with quick dots + full palette, customizable tool row (More → Customize toolbar) — never under the palm |
 | 🔤 Text & images | Text boxes (insert + edit), photo insertion, move / resize / duplicate |
 | 🔷 Shapes | Line, arrow, rect, circle, ellipse, triangle, star, hexagon — select, move, resize |

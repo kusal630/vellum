@@ -201,6 +201,10 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
     override suspend fun setPageTemplate(pageId: Long, templateId: String) =
         pageDao.saveTemplate(pageId, templateId.ifBlank { "BLANK" })
 
+    override suspend fun setPageBackground(pageId: Long, background: PageBackground) {
+        pageDao.saveBackground(pageId, json.encodeToString(PageBackground.serializer(), background))
+    }
+
     override suspend fun setPagePdfBackground(pageId: Long, pdfPageIndex: Int, pdfBackgroundPath: String) =
         pageDao.savePdfBackground(pageId, pdfPageIndex, pdfBackgroundPath)
 

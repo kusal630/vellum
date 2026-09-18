@@ -160,6 +160,10 @@ class EditorViewModel(
     fun setPageTemplate(templateId: String) {
         viewModelScope.launch { repository.setPageTemplate(pageId, templateId) }
     }
+
+    fun setPageBackground(background: com.vellum.notes.model.PageBackground) {
+        viewModelScope.launch { repository.setPageBackground(pageId, background) }
+    }
     fun setTranscript(segments: List<com.vellum.notes.model.TranscriptSegment>) =
         _editor.value?.setTranscript(segments)
     fun setSummary(summary: String?) = _editor.value?.setSummary(summary)

@@ -38,6 +38,8 @@ data class Stroke(
     val style: PenStyle,
     val pointsPacked: FloatArray,
     val widthMm: Float = style.widthMm,
+    /** Wall-clock ms when the stroke was committed; 0 for legacy strokes. Powers ink replay. */
+    val createdAtMs: Long = 0L,
 ) {
     val points: List<Point>
         get() {

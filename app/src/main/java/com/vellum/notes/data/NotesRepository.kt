@@ -60,6 +60,7 @@ interface NotesRepository {
     suspend fun renamePage(pageId: Long, title: String)
     suspend fun reorderPage(pageId: Long, newOrder: Int)
     suspend fun setPageTemplate(pageId: Long, templateId: String)
+    suspend fun setPageBackground(pageId: Long, background: com.vellum.notes.model.PageBackground)
     suspend fun setPagePdfBackground(pageId: Long, pdfPageIndex: Int, pdfBackgroundPath: String)
 
     suspend fun loadPageContent(pageId: Long): PageContent?

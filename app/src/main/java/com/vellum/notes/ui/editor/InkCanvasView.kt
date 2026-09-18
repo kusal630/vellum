@@ -2,6 +2,7 @@ package com.vellum.notes.ui.editor
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -11,6 +12,7 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import com.vellum.notes.editor.StrokeBuilder
+import com.vellum.notes.editor.StrokeReplay
 import com.vellum.notes.editor.Tool
 import com.vellum.notes.input.ClassifiedFrame
 import com.vellum.notes.input.InputCapabilities
@@ -126,6 +128,15 @@ class InkCanvasView @JvmOverloads constructor(
             }
         }
 
+    /** Ink-replay cutoff (wall ms): committed strokes newer than this are hidden. Null shows all. */
+    var replayCutoffMs: Long? = null
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
     /**
      * Page/content switch entry point: drops any in-progress stroke/shape/erase
      * gesture and resets the shared [PalmRejectionEngine] so per-pointer motion,
@@ -204,10 +215,7 @@ class InkCanvasView @JvmOverloads constructor(
 
     private fun typefaceFor(family: String, bold: Boolean): android.graphics.Typeface =
         typefaceCache.getOrPut(family to bold) {
-            android.graphics.Typeface.create(
-                family,
-                if (bold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
-            )
+            com.vellum.notes.editor.CanvasFonts.typefaceForFamily(context, family, bold)
         }
 
     /** Rebuilds [textLinesCache] for the current [texts] (runs on assignment, not per frame). */
@@ -313,6 +321,68 @@ class InkCanvasView @JvmOverloads constructor(
      */
     var onWritingStatusChanged: ((WritingStatus) -> Unit)? = null
     private var lastWritingStatus: WritingStatus = WritingStatus.PEN_READY
+
+    /** Zoom writing aid: magnified strip that accepts ink at 2.5x. */
+    var zoomWindowEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!value) zoomFocusWorld = null
+                invalidate()
+            }
+        }
+    private var zoomFocusWorld: com.vellum.notes.model.Point? = null
+    private val zoomWindowBorderPaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = Color.argb(110, 30, 136, 229)
+    }
+    private val zoomWindowBgPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+    private var zoomTouchActive = false
+
+    private fun currentZoomWindow(): com.vellum.notes.editor.ZoomWindow.WindowRect? {
+        if (width <= 0 || height <= 0) return null
+        return com.vellum.notes.editor.ZoomWindow.windowRect(
+            width.toFloat(), height.toFloat(), resources.displayMetrics.density,
+        )
+    }
+
+    private fun remapForZoomWindow(event: MotionEvent): MotionEvent {
+        if (!zoomWindowEnabled) return event
+        val win = currentZoomWindow() ?: return event
+        val action = event.actionMasked
+        if (action == MotionEvent.ACTION_DOWN) {
+            zoomTouchActive = event.pointerCount == 1 &&
+                win.contains(event.getX(0), event.getY(0))
+            if (!zoomTouchActive) return event
+        }
+        if (!zoomTouchActive) return event
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            zoomTouchActive = false
+        }
+        val focus = zoomFocusWorld ?: return event
+        val zoom = com.vellum.notes.editor.ZoomWindow.DEFAULT_ZOOM
+        val cx = offsetX + scale * focus.x
+        val cy = offsetY + scale * focus.y
+        val n = event.pointerCount
+        val props = Array(n) { MotionEvent.PointerProperties() }
+        val coords = Array(n) { MotionEvent.PointerCoords() }
+        for (i in 0 until n) {
+            event.getPointerProperties(i, props[i])
+            event.getPointerCoords(i, coords[i])
+            coords[i].x = cx + (coords[i].x - win.centerX) / zoom
+            coords[i].y = cy + (coords[i].y - win.centerY) / zoom
+        }
+        return MotionEvent.obtain(
+            event.downTime, event.eventTime, event.action, n, props, coords,
+            event.metaState, event.buttonState, event.xPrecision, event.yPrecision,
+            event.deviceId, event.edgeFlags, event.source, event.flags,
+        )
+    }
 
     /**
      * Fired on a fresh rejected contact (DOWN frame) with its screen-px position so the
@@ -518,6 +588,8 @@ class InkCanvasView @JvmOverloads constructor(
         val bounds: RectF,
         /** Prebuilt second-pass paint for pencil grain; null for non-pencil strokes. */
         val grainPaint: Paint?,
+        /** Commit wall-clock ms (0 = legacy); ink replay hides newer strokes. */
+        val createdAtMs: Long = 0L,
     )
 
     private data class CachedShape(
@@ -626,8 +698,13 @@ class InkCanvasView @JvmOverloads constructor(
                 maxDurationMs = s.maxDurationMs,
             )
         }
-        val input = MotionEventParser.parse(event) ?: return true
-
+        val zoomRemapped = remapForZoomWindow(event)
+        val input = MotionEventParser.parse(zoomRemapped) ?: run {
+            if (zoomRemapped !== event) zoomRemapped.recycle()
+            return true
+        }
+        val zoomOwnedEvent = zoomRemapped !== event
+        try {
         // The scroll bar and the palm-zone grip are direct-manipulation surfaces that
         // must never feed the palm rejection / writing pipeline.
         if (handleScrollBarTouch(input)) {
@@ -694,6 +771,9 @@ class InkCanvasView @JvmOverloads constructor(
             parent?.requestDisallowInterceptTouchEvent(false)
         }
         return true
+        } finally {
+            if (zoomOwnedEvent) zoomRemapped.recycle()
+        }
     }
 
     // --- palm rest zone + scroll bar: geometry and direct manipulation ---
@@ -1198,7 +1278,7 @@ class InkCanvasView @JvmOverloads constructor(
             invalidate()
             return
         }
-        val stroke = builder.onUp(last.x, last.y, 0L)
+        val stroke = builder.onUp(last.x, last.y, 0L)?.copy(createdAtMs = System.currentTimeMillis())
         if (stroke != null) {
             commitStrokeGeometry(stroke)
             listener?.onStrokeCommitted(stroke)
@@ -1679,6 +1759,7 @@ class InkCanvasView @JvmOverloads constructor(
                 com.vellum.notes.render.StrokeCull.padForWidth(stroke.style.widthMm),
             ),
             grainPaint = grainPaint,
+            createdAtMs = stroke.createdAtMs,
         )
     }
 
@@ -1800,6 +1881,37 @@ class InkCanvasView @JvmOverloads constructor(
         canvas.drawPath(livePath, livePaint)
     }
 
+    private fun drawZoomWindow(canvas: Canvas) {
+        if (!zoomWindowEnabled) return
+        val win = currentZoomWindow() ?: return
+        val focus = zoomFocusWorld ?: run {
+            val cx = ((width / 2f - offsetX) / scale)
+                .takeIf { it.isFinite() } ?: 105f
+            val cy = ((height / 2f - offsetY) / scale)
+                .takeIf { it.isFinite() } ?: 148f
+            com.vellum.notes.model.Point(cx, cy).also { zoomFocusWorld = it }
+        }
+        val zoom = com.vellum.notes.editor.ZoomWindow.DEFAULT_ZOOM
+        val clip = com.vellum.notes.editor.ZoomWindow.worldClipFor(focus, win, scale)
+        val clipRect = RectF(clip.left, clip.top, clip.right, clip.bottom)
+        canvas.save()
+        canvas.clipRect(win.left, win.top, win.right, win.bottom)
+        canvas.drawRect(win.left, win.top, win.right, win.bottom, zoomWindowBgPaint)
+        canvas.translate(win.centerX, win.centerY)
+        canvas.scale(zoom, zoom)
+        canvas.translate(-(offsetX + scale * focus.x), -(offsetY + scale * focus.y))
+        com.vellum.notes.render.PageBackgroundRenderer.drawBackground(canvas, background, 1f, clipRect)
+        val cull = com.vellum.notes.render.StrokeCull
+        for (item in displayStrokes) {
+            if (!cull.isVisible(item.bounds, clipRect)) continue
+            if (!com.vellum.notes.editor.StrokeReplay.visibleInReplay(item.createdAtMs, replayCutoffMs)) continue
+            drawCommittedStroke(canvas, item)
+        }
+        canvas.restore()
+        zoomWindowBorderPaint.strokeWidth = 2f
+        canvas.drawRect(win.left, win.top, win.right, win.bottom, zoomWindowBorderPaint)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!::capabilities.isInitialized) return
@@ -1914,7 +2026,8 @@ class InkCanvasView @JvmOverloads constructor(
         }
         for (item in displayStrokes) {
             if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER &&
-                cull.isVisible(item.bounds, worldClip)
+                cull.isVisible(item.bounds, worldClip) &&
+                StrokeReplay.visibleInReplay(item.createdAtMs, replayCutoffMs)
             ) {
                 drawCommittedStroke(canvas, item)
             }
@@ -1926,7 +2039,8 @@ class InkCanvasView @JvmOverloads constructor(
         }
         for (item in displayStrokes) {
             if (item.type != com.vellum.notes.model.PenType.HIGHLIGHTER &&
-                cull.isVisible(item.bounds, worldClip)
+                cull.isVisible(item.bounds, worldClip) &&
+                StrokeReplay.visibleInReplay(item.createdAtMs, replayCutoffMs)
             ) {
                 drawCommittedStroke(canvas, item)
             }
@@ -1948,8 +2062,6 @@ class InkCanvasView @JvmOverloads constructor(
             // Use the style captured at stroke start: the live stroke must always match
             // what gets committed on pen-up, even if the toolbar changed mid-stroke.
             drawLiveStroke(canvas, pts, builder.style)
-            // Predicted tip: one translucent segment ahead of the last real sample.
-            // Replaced by real ink next frame; never committed.
             builder.predictedTip()?.let { tip ->
                 val last = pts.last()
                 val st = builder.style
@@ -1958,8 +2070,15 @@ class InkCanvasView @JvmOverloads constructor(
                 ghostPaint.strokeWidth = st.widthMm.coerceAtLeast(0.2f)
                 canvas.drawLine(last.x, last.y, tip.x, tip.y, ghostPaint)
             }
+            if (zoomWindowEnabled) {
+                zoomFocusWorld = com.vellum.notes.editor.ZoomWindow.focusFollowsTip(
+                    zoomFocusWorld,
+                    com.vellum.notes.model.Point(pts.last().x, pts.last().y),
+                )
+            }
         }
         canvas.restore()
+        drawZoomWindow(canvas)
 
         // Screen-space selection overlays.
         selectionBoundsMm?.let { bounds ->

@@ -25,8 +25,6 @@ object PageBackgroundRenderer {
     const val PAGE_H_MM = 297f
     private const val PAGE_CORNER_MM = 5f
 
-    private val deskLight = Color.argb(255, 0xE3, 0xDE, 0xD3)
-    private val deskDark = Color.argb(255, 0x0B, 0x0E, 0x14)
     private val shadowPaint = Paint().apply { isAntiAlias = true }
     private val sheetPaint = Paint().apply { isAntiAlias = true }
     private val sheetEdgePaint = Paint().apply {
@@ -41,23 +39,17 @@ object PageBackgroundRenderer {
     private var sheenShader: LinearGradient? = null
     private var sheenPaperColor = 0
 
-    private fun deskColorFor(paperColor: Int): Int {
-        // relative luminance of the paper color decides the desk tone
-        val r = (paperColor shr 16) and 0xFF
-        val g = (paperColor shr 8) and 0xFF
-        val b = paperColor and 0xFF
-        val lum = (0.299f * r + 0.587f * g + 0.114f * b) / 255f
-        return if (lum < 0.45f) deskDark else deskLight
-    }
-
     fun drawBackground(canvas: Canvas, bg: PageBackground, pxPerMm: Float, worldClip: RectF) {
         val bgColor = (bg.colorArgb and 0xFFFFFFFF.toLong()).toInt()
 
-        // 1) Desk: the surface the paper sheet rests on, visible beyond the page.
-        canvas.drawColor(deskColorFor(bgColor))
+        // 1) Paper fills the whole viewport: no desk void around the page, at any
+        // zoom. The export page bounds below stay the canonical page size.
+        sheetPaint.style = Paint.Style.FILL
+        sheetPaint.color = bgColor
+        canvas.drawRect(worldClip, sheetPaint)
 
-        // 2) Paper sheet: fixed-size rounded page with a soft layered shadow, so the
-        // writing surface reads as a physical notebook page (Noteshelf-grade look).
+        // 2) Page sheet edge: soft layered shadow + hairline at the canonical
+        // page rect, so the export bounds stay visible while writing anywhere.
         val shadowLayers = floatArrayOf(0.020f, 0.012f, 0.006f)
         val shadowAlphas = intArrayOf(26, 34, 44)
         shadowPaint.style = Paint.Style.FILL
@@ -94,11 +86,12 @@ object PageBackgroundRenderer {
 
         linePaint.color = bg.lineColorArgb.toInt()
 
-        // 4) Template pattern is generated only INSIDE the sheet — clip hard.
-        val fromX = worldClip.left.coerceAtLeast(0f)
-        val fromY = worldClip.top.coerceAtLeast(0f)
-        val toX = worldClip.right.coerceAtMost(PAGE_W_MM)
-        val toY = worldClip.bottom.coerceAtMost(PAGE_H_MM)
+        // 4) Template pattern tiles across the whole visible paper, seamless at
+        // any zoom: loops already align to the spacing grid from the clip.
+        val fromX = worldClip.left
+        val fromY = worldClip.top
+        val toX = worldClip.right
+        val toY = worldClip.bottom
         if (fromX >= toX || fromY >= toY) return
 
         when (bg.type) {

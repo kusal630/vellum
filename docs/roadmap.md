@@ -43,6 +43,10 @@
 - [x] Commit-time stroke thinning (RDP ε=0.05mm in StrokeBuilder.onUp)
 - [x] Predicted-tip ghost segment on the live stroke (StrokePredictor, 1 frame)
 - [x] Stylus hover latch: view feeds onHoverEvent into the engine hover gate
+- [x] Two-finger pan with palm resting: hardware-writer handoff rule (finger-sized writers yield to pinch)
+- [x] Ink replay: commit timestamps + Replay tab with play/scrub over stroke history
+- [x] Zoom writing aid: 2.5x magnified strip with remapped ink input
+- [x] White paper default + paper fills viewport (no desk void) + White/Dark toggle in template dialog
 - [x] FAR/FRR-gated replay battery + left-hand/edge/hover/pinch fixtures
 - [x] Auto-erase (write/erase detection) toggle
 - [x] Page template picker per page

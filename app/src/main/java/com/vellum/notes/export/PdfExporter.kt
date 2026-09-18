@@ -125,8 +125,7 @@ object PdfExporter {
                     val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         color = t.colorArgb.toInt()
                         textSize = t.fontSizeMm
-                        typeface = if (t.bold) android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.BOLD)
-                                   else android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.NORMAL)
+                        typeface = com.vellum.notes.editor.CanvasFonts.typefaceForFamily(context, t.fontFamily, t.bold)
                         if (t.italic) textSkewX = -0.25f
                         if (t.underline) isUnderlineText = true
                         isSubpixelText = true

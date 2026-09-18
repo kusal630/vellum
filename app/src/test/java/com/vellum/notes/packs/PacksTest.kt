@@ -50,7 +50,9 @@ class PacksTest {
         assertFalse(e.classroomPack)
         assertFalse(e.pdfPack)
         assertFalse(e.gesturePack)
-        assertFalse(repo().isUnlocked(PackId.CLASSROOM))
+        // Paywalls disabled: flags stay false but everything reads unlocked.
+        assertTrue(PackEntitlements.PAYWALLS_DISABLED)
+        assertTrue(repo().isUnlocked(PackId.CLASSROOM))
     }
 
     @Test
@@ -59,11 +61,13 @@ class PacksTest {
         val r = repo()
         r.setUnlocked(PackId.CLASSROOM, true)
         r.setUnlocked(PackId.PDF, true)
+        assertTrue(r.entitlements.first().classroomPack)
+        assertTrue(r.entitlements.first().pdfPack)
         assertTrue(r.isUnlocked(PackId.CLASSROOM))
         assertTrue(r.isUnlocked(PackId.PDF))
-        assertFalse(r.isUnlocked(PackId.GESTURE))
+        assertTrue(r.isUnlocked(PackId.GESTURE))
         r.setUnlocked(PackId.CLASSROOM, false)
-        assertFalse(r.isUnlocked(PackId.CLASSROOM))
+        assertTrue(r.isUnlocked(PackId.CLASSROOM))
         reset()
     }
 
@@ -147,7 +151,7 @@ class PacksTest {
         assertEquals(setOf(PackId.GESTURE, PackId.PDF), restored)
         assertTrue(r.isUnlocked(PackId.PDF))
         assertTrue(r.isUnlocked(PackId.GESTURE))
-        assertFalse(r.isUnlocked(PackId.CLASSROOM))
+        assertTrue(r.isUnlocked(PackId.CLASSROOM))
         reset()
     }
 

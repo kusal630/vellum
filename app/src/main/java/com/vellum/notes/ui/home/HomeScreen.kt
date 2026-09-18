@@ -89,6 +89,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -328,10 +329,10 @@ fun HomeScreen(
     var sortByName by remember { mutableStateOf(false) }
     var activeTagId by remember { mutableStateOf<Long?>(null) }
     // Launch veil: warm brand splash that scales in, then fades. Never blocks
-    // touches (no input modifiers) and shows once per process lifetime of this
-    // composition.
-    var veil by remember { mutableStateOf(true) }
-    var veilIn by remember { mutableStateOf(false) }
+    // touches (no input modifiers). Saveable (not plain remember) so popping
+    // back from the editor restores veil=false instead of replaying the splash.
+    var veil by rememberSaveable { mutableStateOf(true) }
+    var veilIn by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         veilIn = true
         kotlinx.coroutines.delay(400)
@@ -546,7 +547,6 @@ fun HomeScreen(
                     Text(
                         "Vellum",
                         style = MaterialTheme.typography.displayMedium.copy(
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                             fontWeight = FontWeight.Bold,
                         ),
                         color = Color(0xFF4E342E),
@@ -554,9 +554,7 @@ fun HomeScreen(
                     )
                     Text(
                         "offline notes",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                        ),
+                        style = MaterialTheme.typography.titleSmall,
                         color = Color(0xFF8D6E63),
                     )
                 }

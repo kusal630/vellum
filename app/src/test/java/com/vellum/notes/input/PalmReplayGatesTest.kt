@@ -249,4 +249,37 @@ class PalmReplayGatesTest {
             join.contactFor(1)?.classification != ContactClassification.WRITING,
         )
     }
+
+    @Test
+    fun twoFingersWithPalmResting_startsPanInsteadOfInking() {
+        val e = engine()
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L, listOf(palm(9, 150f, 700f, 0L)), added = 9,
+            ),
+        )
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 10L,
+                listOf(
+                    palm(9, 150f, 700f, 0L),
+                    TestTouchFactory.fingertip(pointerId = 1, x = 300f, y = 300f, timeMs = 10L),
+                ),
+                added = 1,
+            ),
+        )
+        val join = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(
+                    palm(9, 150f, 700f, 0L),
+                    TestTouchFactory.fingertip(pointerId = 1, x = 300f, y = 300f, timeMs = 10L),
+                    TestTouchFactory.fingertip(pointerId = 2, x = 500f, y = 500f, timeMs = 20L),
+                ),
+                added = 2,
+            ),
+        )
+        assertEquals(null, join.activeWritingPointerId)
+        assertEquals(listOf(1, 2), join.gesturePointerIds)
+    }
 }
