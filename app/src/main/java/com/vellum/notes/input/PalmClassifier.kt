@@ -182,15 +182,18 @@ class PalmClassifier(
                 // emit ink on DOWN before motion confirms it — same CANDIDATE buffering
                 // as the cold-start path in classifySingle. (Size/pressure history can
                 // never seed on such devices, so every DOWN stays buffered until it moves.)
-                if (history.validSizes.isEmpty() && history.palmSizes.isEmpty()) {
-                    return ClassificationResult(
-                        ContactClassification.CANDIDATE,
-                        0.3f,
-                        ClassificationReason.CANDIDATE_BUFFER,
-                        0f,
-                    )
-                }
-                return result(ContactClassification.WRITING, 0.5f, ClassificationReason.FINGER_WRITING, 0f, ctx)
+                // PH-07: on devices with no geometry reporting, a CANDIDATE contact must
+                // not be promoted to WRITING by movement alone — movement without size
+                // evidence is indistinguishable from a palm sliding across the screen.
+                // Keep it as CANDIDATE (the resting tracker will still resolve it to WRITING
+                // once the contact moves, because the engine's pending-candidate promotion
+                // requires distance moved with stroke velocity).
+                return ClassificationResult(
+                    ContactClassification.CANDIDATE,
+                    0.3f,
+                    ClassificationReason.CANDIDATE_BUFFER,
+                    0f,
+                )
             }
             return result(ContactClassification.FINGER, 0.35f, ClassificationReason.NO_GEOMETRY_INFO, 0f, ctx)
         }

@@ -21,7 +21,12 @@ class InputNormalizer(private val capabilities: InputCapabilities) {
     fun normalize(raw: RawTouchContact): NormalizedContact {
         var hasGeometry = raw.toolMajorPx > 0f && raw.toolMinorPx > 0f
         var hasSize = raw.size > 0f
-        val maxPlausiblePx = MAX_PLAUSIBLE_CONTACT_MM * capabilities.pxPerMm
+        // When pxPerMm is zero (degraded display metrics) we cannot convert raw
+        // pixel geometry to millimetres. Force geometry unavailable so the fallback
+        // size-derived path is used; if that also collapses we land in the no-geometry
+        // classifier path which is safe (does not misclassify a palm as writing).
+        if (capabilities.pxPerMm <= 0f) hasGeometry = false
+        val maxPlausiblePx = if (capabilities.pxPerMm > 0f) MAX_PLAUSIBLE_CONTACT_MM * capabilities.pxPerMm else MAX_PLAUSIBLE_CONTACT_MM * 10f
 
         val majorPx: Float
         val minorPx: Float

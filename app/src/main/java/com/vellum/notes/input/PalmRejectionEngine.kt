@@ -395,10 +395,25 @@ class PalmRejectionEngine(
      * finger writing is enabled. Every other tool (stylus, palm-sized contacts)
      * still respects the hold-off so a resting palm cannot claim writing right
      * after a lift.
+     * PH-08: at cold start (no lock has ever been held in this session), skip the
+     * hold-off entirely for the first claim so a genuine writer is never delayed by
+     * the post-lift cooldown — the hold-off exists to prevent a resting palm from
+     * re-claiming writing after it was lifted, but there is no prior lock to protect
+     * against on the very first contact.
      */
-    private fun shouldRespectHoldoff(tool: ToolKind): Boolean =
-        !(currentSettings.enableFingerWriting &&
-            (tool == ToolKind.FINGER || tool == ToolKind.UNKNOWN))
+    private fun shouldRespectHoldoff(tool: ToolKind, nowNanos: Long): Boolean {
+        // Fast path: hold-off always respected for non-finger tools.
+        if (tool != ToolKind.FINGER && tool != ToolKind.UNKNOWN) return true
+        // Finger writing disabled: treat finger like palm, always hold off.
+        if (!currentSettings.enableFingerWriting) return true
+        // Cold start: no lock was ever held in this session — no hold-off needed.
+        if (lock.lockAcquiredAtNanos() == 0L) return false
+        // Finger writing enabled + finger tool: always bypass the hold-off, even
+        // inside the post-lift window. The hold-off exists to prevent a resting palm
+        // (or stylus) from re-claiming writing after a finger lifted; a finger itself
+        // must always be able to re-claim immediately (fast consecutive finger strokes).
+        return false
+    }
 
     private fun manageWritingLock(
         frame: InputFrame,
@@ -447,7 +462,7 @@ class PalmRejectionEngine(
                         lock.tryClaim(
                             frame.addedPointerId,
                             nowNanos,
-                            respectHoldoff = shouldRespectHoldoff(candidate.contact.toolType),
+                            respectHoldoff = shouldRespectHoldoff(candidate.contact.toolType, nowNanos),
                         )
                         if (lock.activePointerId == frame.addedPointerId) pendingCandidateId = null
                     } else {
@@ -501,7 +516,7 @@ class PalmRejectionEngine(
                                 lock.tryClaim(
                                     addedId,
                                     nowNanos,
-                                    respectHoldoff = shouldRespectHoldoff(added.contact.toolType),
+                                    respectHoldoff = shouldRespectHoldoff(added.contact.toolType, nowNanos),
                                 )
                             }
                         } else {
@@ -548,7 +563,7 @@ class PalmRejectionEngine(
                                 // borderline size ratios — otherwise a slow pen that lands
                                 // next to a medium palm is dropped and no ink appears.
                                 // Require only that the newcomer is genuinely smaller.
-                                val lockHeldMs = (nowNanos - lock.lockAcquiredAtNanos) / 1_000_000L
+                                val lockHeldMs = (nowNanos - lock.lockAcquiredAtNanos()) / 1_000_000L
                                 val confirmedWriterHandoff = !handOff && !palmHolderHandoff &&
                                     currentSettings.enableFingerWriting &&
                                     lockHeldMs >= 80L &&

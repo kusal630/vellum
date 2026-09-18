@@ -35,10 +35,16 @@ data class InputCapabilities(
     /** Device has known palm-classification behavior hints (informational only). */
     val hasPalmClassificationHint: Boolean,
     val apiLevel: Int,
+    /** Whether this instance was produced by a successful [detect] call (never defaults). */
+    val isRealDeviceScan: Boolean = false,
 ) {
-    fun dimFromPx(px: Float): Float = if (pxPerMm > 0f) px / pxPerMm else 0f
+    fun dimFromPx(px: Float): Float = if (pxPerMm > 0f) px / pxPerMm else px / 10f
 
     companion object {
+        /** Plausible px/mm range for any consumer touch display. */
+        private const val MIN_PX_PER_MM = 5f
+        private const val MAX_PX_PER_MM = 22f
+
         /**
          * Detects [InputCapabilities] from the running hardware. This is honest detection:
          * `supportsStylus` is true only when an input device actually reports a stylus source.
@@ -48,14 +54,47 @@ data class InputCapabilities(
         fun detect(context: Context): InputCapabilities {
             val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val metrics = DisplayMetrics()
-            wm.defaultDisplay.getRealMetrics(metrics)
 
-            val densityDpi = metrics.densityDpi.coerceAtLeast(1)
-            val pxPerMm = densityDpi / 25.4f
-            val displayMaxPx = maxOf(metrics.widthPixels, metrics.heightPixels)
+            var densityDpi: Int = 0
+            var widthPx: Int = 0
+            var heightPx: Int = 0
+            var ok = false
+
+            try {
+                // getRealMetrics is the most honest path but may fail on newer API levels
+                // or on displays that are not yet ready (early Application.onCreate, multi-display,
+                // restricted profiles). Fall back to the resources-backed metrics.
+                wm.defaultDisplay.getRealMetrics(metrics)
+                densityDpi = metrics.densityDpi
+                widthPx = metrics.widthPixels
+                heightPx = metrics.heightPixels
+                ok = densityDpi > 0 && widthPx > 0 && heightPx > 0
+            } catch (t: Throwable) {
+                // noqa
+            }
+
+            if (!ok) {
+                // Fallback: use the resources metrics, which are always populated by the time
+                // a real Activity is on-screen. These may be slightly less accurate (e.g. not
+                // accounting for system bars) but are safe for classification purposes.
+                val resMetrics = context.resources.displayMetrics
+                densityDpi = resMetrics.densityDpi
+                widthPx = resMetrics.widthPixels
+                heightPx = resMetrics.heightPixels
+                if (densityDpi <= 0 || widthPx <= 0 || heightPx <= 0) {
+                    // Truly unusable: fall back to conservative software defaults.
+                    densityDpi = 240
+                    widthPx = 1920
+                    heightPx = 1080
+                }
+            }
+
+            val clampedDpi = densityDpi.coerceIn(1, 640)
+            val rawPxPerMm = clampedDpi / 25.4f
+            val pxPerMm = rawPxPerMm.coerceIn(MIN_PX_PER_MM, MAX_PX_PER_MM)
+            val displayMaxPx = maxOf(widthPx, heightPx).toFloat().coerceAtLeast(1f)
             val diagPx = kotlin.math.sqrt(
-                (metrics.widthPixels * metrics.widthPixels +
-                    metrics.heightPixels * metrics.heightPixels).toDouble()
+                (widthPx * widthPx + heightPx * heightPx).toDouble()
             )
             val screenDiagonalMm = (diagPx / pxPerMm).toFloat()
 
@@ -72,22 +111,26 @@ data class InputCapabilities(
             }
 
             // A stylus source that also reports class-specific tool types (active stylus).
+            // NOTE: we check whether ANY stylus-capable device exposes tool-type classification,
+            // not just the first stylus source, because multiple stylus devices can be present.
+            val hasAnyStylusWithToolType = hasStylusDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
             val stylusToolTypeExposed = stylusSources.any { s ->
                 s and InputDevice.SOURCE_STYLUS != 0
-            }
+            } && hasAnyStylusWithToolType
 
             return InputCapabilities(
                 pxPerMm = pxPerMm,
-                displayMaxPx = displayMaxPx.toFloat(),
-                screenDiagonalMm = screenDiagonalMm.toFloat(),
+                displayMaxPx = displayMaxPx,
+                screenDiagonalMm = screenDiagonalMm,
                 supportsStylus = hasStylusDevice,
                 supportsToolType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT,
-                supportsStylusToolType = stylusToolTypeExposed,
+                supportsStylusToolType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasStylusDevice,
                 supportsContactSize = true,
                 supportsPressure = true,
                 supportsMultiTouch = true,
                 hasPalmClassificationHint = false,
                 apiLevel = Build.VERSION.SDK_INT,
+                isRealDeviceScan = true,
             )
         }
 

@@ -12,12 +12,16 @@ class WritingLock(
     var activePointerId: Int? = null
         private set
 
-    var lockAcquiredAtNanos: Long = 0L
-        private set
-
+    private var lockAcquiredAtNanos: Long = 0L
     private var lastLiftNanos: Long = 0L
 
     val isActive: Boolean get() = activePointerId != null
+
+    /** True when the lock has ever been claimed in this instance's lifetime. */
+    fun lockAcquiredAtNanos(): Long = lockAcquiredAtNanos
+
+    /** Time of the most recent release/reset. 0L until the first release. */
+    fun lastLiftNanos(): Long = lastLiftNanos
 
     /**
      * Attempts to claim [pointerId] as the writing pointer. Honours the hold-off so a
