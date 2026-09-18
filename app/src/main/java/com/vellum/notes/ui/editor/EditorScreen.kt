@@ -414,6 +414,9 @@ fun EditorScreen(
     var inkReplayCutoff by remember(pageId) { mutableStateOf<Long?>(null) }
     var inkReplaying by remember(pageId) { mutableStateOf(false) }
     var zoomWindowOn by rememberSaveable(pageId) { mutableStateOf(false) }
+    var insertSpaceArmed by rememberSaveable(pageId) { mutableStateOf(false) }
+    var inkActive by remember(pageId) { mutableStateOf(false) }
+    var canvasView by remember(pageId) { mutableStateOf<InkCanvasView?>(null) }
     LaunchedEffect(inkReplaying, pageId) {
         if (!inkReplaying) return@LaunchedEffect
         val range = inkReplayRange ?: run { inkReplaying = false; return@LaunchedEffect }
@@ -936,6 +939,13 @@ fun EditorScreen(
             ) {
                 // Floating pills up top (never under the palm at the bottom):
                 // navigation, tools and page actions hover over the canvas.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !inkActive,
+                    enter = androidx.compose.animation.slideInVertically { -it } +
+                        androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.slideOutVertically { -it } +
+                        androidx.compose.animation.fadeOut(),
+                ) {
                 CanvasTopBar(
                     tool = tool,
                     syncStatus = syncStatus,
@@ -1010,6 +1020,9 @@ fun EditorScreen(
                     },
                     zoomWindowEnabled = zoomWindowOn,
                     onToggleZoomWindow = { zoomWindowOn = !zoomWindowOn },
+                    onFitToPage = { canvasView?.zoomToFitContent() },
+                    insertSpaceArmed = insertSpaceArmed,
+                    onToggleInsertSpace = { insertSpaceArmed = !insertSpaceArmed },
                     onInsertText = { showTextDialog = true },
                     onInsertImage = {
                         imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -1055,6 +1068,7 @@ fun EditorScreen(
                     },
                     onLockedPack = { unlockPack = it },
                 )
+                }
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Canvas fills the whole screen so you can write edge to edge; the page
                 // rail is a hideable overlay toggled from the top bar. Keying by pageId
@@ -1080,7 +1094,9 @@ fun EditorScreen(
                                     view.engine = engine
                                     view.listener = vm.canvasListener
                                     view.onWritingStatusChanged = { writingStatus = it }
+                                    view.onInkActiveChanged = { inkActive = it }
                                     engine.reset()
+                                    canvasView = view
                                 }
                             },
                             update = { view ->
@@ -1098,9 +1114,15 @@ fun EditorScreen(
                                 view.selectionBoundsMm = state.selectionBoundsMm
                                 view.listener = vm.canvasListener
                                 view.onWritingStatusChanged = { writingStatus = it }
+                                view.onInkActiveChanged = { inkActive = it }
                                 view.autoEraseEnabled = settings.autoEraseEnabled
                                 view.replayCutoffMs = inkReplayCutoff
                                 view.zoomWindowEnabled = zoomWindowOn
+                                view.insertSpaceArmed = insertSpaceArmed
+                                view.onInsertSpace = { anchorY, gapMm ->
+                                    insertSpaceArmed = false
+                                    vm.insertSpace(anchorY, gapMm)
+                                }
                                 view.scribbleSensitivity = settings.scribbleSensitivity
                                 view.debugOverlayEnabled = settings.debugOverlayEnabled
                                 // Palm rest zone + scroll bar.
@@ -2614,6 +2636,9 @@ private fun CanvasTopBar(
     onToggleToolHidden: (String) -> Unit = {},
     zoomWindowEnabled: Boolean = false,
     onToggleZoomWindow: () -> Unit = {},
+    onFitToPage: () -> Unit = {},
+    insertSpaceArmed: Boolean = false,
+    onToggleInsertSpace: () -> Unit = {},
     onInsertText: () -> Unit = {},
     onInsertImage: () -> Unit = {},
     onPickTemplate: () -> Unit = {},
@@ -2687,6 +2712,9 @@ private fun CanvasTopBar(
             onToggleToolHidden = onToggleToolHidden,
             zoomWindowEnabled = zoomWindowEnabled,
             onToggleZoomWindow = onToggleZoomWindow,
+            onFitToPage = onFitToPage,
+            insertSpaceArmed = insertSpaceArmed,
+            onToggleInsertSpace = onToggleInsertSpace,
             onAutoEraseToggle = onAutoEraseToggle,
             onInsertText = onInsertText,
             onInsertImage = onInsertImage,
@@ -2754,6 +2782,9 @@ private fun FixedToolbarContent(
     onToggleToolHidden: (String) -> Unit = {},
     zoomWindowEnabled: Boolean = false,
     onToggleZoomWindow: () -> Unit = {},
+    onFitToPage: () -> Unit = {},
+    insertSpaceArmed: Boolean = false,
+    onToggleInsertSpace: () -> Unit = {},
     classroomUnlocked: Boolean = false,
     pdfUnlocked: Boolean = false,
     gestureUnlocked: Boolean = false,
@@ -2917,6 +2948,14 @@ private fun FixedToolbarContent(
                             DropdownMenuItem(
                                 text = { Text(if (zoomWindowEnabled) "✓ Zoom writing aid" else "Zoom writing aid") },
                                 onClick = { overflowOpen = false; onToggleZoomWindow() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Fit to page") },
+                                onClick = { overflowOpen = false; onFitToPage() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (insertSpaceArmed) "✓ Insert space" else "Insert space") },
+                                onClick = { overflowOpen = false; onToggleInsertSpace() },
                             )
                         }
                     }

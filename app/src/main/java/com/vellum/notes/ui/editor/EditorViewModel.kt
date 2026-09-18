@@ -176,6 +176,12 @@ class EditorViewModel(
     fun smoothSelection() = _editor.value?.smoothSelection()
     fun clearSelection() = _editor.value?.clearSelection()
 
+    fun insertSpace(anchorY: Float, dyMm: Float) {
+        val editor = _editor.value ?: return
+        if (dyMm == 0f) return
+        editor.apply(com.vellum.notes.editor.ReflowContentCommand(anchorY, dyMm))
+    }
+
     /** Nebo-style convert; returns the new text id (0 when nothing convertible). */
     fun convertSelectionToText(): Long = _editor.value?.convertSelectionToText() ?: 0L
 

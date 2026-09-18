@@ -15,7 +15,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 
 | Area | What you get |
 |---|---|
-| ✍️ Handwriting | Low-latency ink (predicted-tip ghost), pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup, RDP-thinned stroke storage, ink replay, zoom writing aid |
+| ✍️ Handwriting | Low-latency ink (predicted-tip ghost), pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup, RDP-thinned stroke storage, ink replay with fade-in, zoom writing aid, insert-space reflow, circle-to-select |
 | 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), Low/Med/High sensitivity presets, saturated-pressure palm confirmation, stylus-hover gating, two-finger pan that works with a palm down, per-device calibration + Labs screen. Acceptance-tested: palm-first, mid-stroke palm, no-palm, and continued writing all keep inking |
 | 🧰 Toolbar | Floating pills up top (navigate/undo, tools, page actions), tap the active pen for colors & thickness, left color rail with quick dots + full palette, customizable tool row (More → Customize toolbar) — never under the palm |
 | 🔤 Text & images | Text boxes (insert + edit), photo insertion, move / resize / duplicate |
@@ -29,7 +29,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
 | 📖 Read mode | Read imported books full-screen (Original/Sepia/Night), freehand highlighter in 4 colors, tap-erase, every highlight saved per page + searchable review list that jumps back to the exact page |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |
-| 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, undo/redo (incl. two-finger double-tap), viewport-culled display list (off-screen ink skipped, zero-allocation draw path, surgical partial invalidation while writing), no auto-scroll (viewport moves only by pan/zoom/scroll bar), light & dark themes |
+| 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, spring-animated Fit to page, toolbar auto-hide while writing, undo/redo (incl. two-finger double-tap), viewport-culled display list (off-screen ink skipped, zero-allocation draw path, surgical partial invalidation while writing), no auto-scroll (viewport moves only by pan/zoom/scroll bar), light & dark themes |
 | ✍️ Convert | Select ink → **Convert** to an editable text box (single undo step; on-device $1-style print recognition, A–Z/0–9, "?" marks low confidence) |
 | 🧪 Diagnostics | Input Labs screen for calibrating palm rejection to your hardware |
 

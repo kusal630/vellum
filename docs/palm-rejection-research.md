@@ -96,3 +96,16 @@ documentation (developer.android.com) — extracted verbatim points, condensed._
   motion) hold the never-write invariant across 200 seeds x 30 frames.
   Palm-growth cancel verified: EMA + hysteresis ride out spikes, then
   PALM_GROWTH_CANCELLED releases the lock once settled.
+
+## 7. 2026-09-18 wave 2: fluid editing (GoodNotes Smart Ink parity, offline)
+
+- Smart Ink reflow/insert-space, circle-to-lasso, scribble-to-erase and
+  handwriting search are the 2026 battleground (GoodNotes 6, Notability 15).
+  Vellum now ships insert-space (drag-a-gap with undoable command),
+  circle-to-select (fast closed loops; area-gated so zigzags never match)
+  and handwriting search; scribble-erase pre-existed.
+- Cloud AI (spellcheck-in-own-handwriting, Ask-docs, math solver) stays out
+  per the offline doctrine; the same jobs are covered on-device where
+  feasible ($1 recognition, extractive summary).
+- Two-finger pan with a palm down was broken (fingers latched as writers);
+  fixed by restricting lock handoff to hardware writers.

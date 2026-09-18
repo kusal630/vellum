@@ -47,6 +47,10 @@
 - [x] Ink replay: commit timestamps + Replay tab with play/scrub over stroke history
 - [x] Zoom writing aid: 2.5x magnified strip with remapped ink input
 - [x] White paper default + paper fills viewport (no desk void) + White/Dark toggle in template dialog
+- [x] Insert-space reflow (drag a gap; undoable ReflowContentCommand)
+- [x] Circle-to-select pen gesture (fast closed loops select instead of inking)
+- [x] Spring viewport animator + Fit to page + toolbar auto-hide while writing
+- [x] Replay fade-in (fresh strokes ease from 25% alpha over 600ms)
 - [x] FAR/FRR-gated replay battery + left-hand/edge/hover/pinch fixtures
 - [x] Auto-erase (write/erase detection) toggle
 - [x] Page template picker per page

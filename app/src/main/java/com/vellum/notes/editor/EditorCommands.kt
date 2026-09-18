@@ -49,6 +49,13 @@ class AddStrokesCommand(val strokes: List<Stroke>) : EditorCommand {
     override fun invert() = RemoveStrokesCommand(strokes)
 }
 
+/** Shifts everything at or below [anchorY] by [dyMm] (insert-space reflow). */
+class ReflowContentCommand(val anchorY: Float, val dyMm: Float) : EditorCommand {
+    override fun apply(content: PageContent) = InkReflow.shiftBelow(content, anchorY, dyMm)
+
+    override fun invert() = ReflowContentCommand(anchorY, -dyMm)
+}
+
 class AddShapeCommand(val shape: ShapeObject) : EditorCommand {
     override fun apply(content: PageContent) =
         content.copy(shapeObjects = content.shapeObjects + shape)

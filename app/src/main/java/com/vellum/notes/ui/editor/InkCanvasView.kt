@@ -137,6 +137,29 @@ class InkCanvasView @JvmOverloads constructor(
             }
         }
 
+    /** Insert-space mode: the next vertical drag opens a gap; committed via [onInsertSpace]. */
+    var insertSpaceArmed: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                insertSpaceAnchorY = null
+                insertSpaceGapMm = 0f
+                invalidate()
+            }
+        }
+    var onInsertSpace: ((anchorYWorldMm: Float, gapMm: Float) -> Unit)? = null
+    private var insertSpaceAnchorY: Float? = null
+    private var insertSpaceGapMm: Float = 0f
+    private val insertSpaceBandPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = Color.argb(40, 30, 136, 229)
+    }
+    private val insertSpaceLinePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = Color.argb(200, 30, 136, 229)
+    }
+
     /**
      * Page/content switch entry point: drops any in-progress stroke/shape/erase
      * gesture and resets the shared [PalmRejectionEngine] so per-pointer motion,
@@ -571,6 +594,16 @@ class InkCanvasView @JvmOverloads constructor(
 
     // --- active stroke ---
     private var strokeBuilder: StrokeBuilder? = null
+        set(value) {
+            if (field !== value) {
+                field = value
+                onInkActiveChanged?.invoke(value != null)
+            }
+        }
+    private var strokeStartNanos: Long = 0L
+
+    /** Fired when ink starts/stops: the UI auto-hides chrome while drawing. */
+    var onInkActiveChanged: ((Boolean) -> Unit)? = null
 
     // --- committed content display list ---
     // Only geometry is cached (paths + paints); onDraw draws every committed stroke and
@@ -590,6 +623,8 @@ class InkCanvasView @JvmOverloads constructor(
         val grainPaint: Paint?,
         /** Commit wall-clock ms (0 = legacy); ink replay hides newer strokes. */
         val createdAtMs: Long = 0L,
+        /** Paint alpha at build time; replay fade scales from this, never above. */
+        val baseAlpha: Int = 255,
     )
 
     private data class CachedShape(
@@ -638,6 +673,56 @@ class InkCanvasView @JvmOverloads constructor(
     fun screenToWorldX(sx: Float) = (sx - offsetX) / scale
     fun screenToWorldY(sy: Float) = (sy - offsetY) / scale
 
+    private var viewportAnim: android.animation.ValueAnimator? = null
+
+    fun currentViewport() = com.vellum.notes.editor.ViewportAnimator.Viewport(zoom, offsetX, offsetY)
+
+    fun animateViewportTo(target: com.vellum.notes.editor.ViewportAnimator.Viewport, durationMs: Long = 280L) {
+        viewportAnim?.cancel()
+        viewportAnim = com.vellum.notes.editor.ViewportAnimator.animate(
+            currentViewport(), target, durationMs,
+        ) {
+            zoom = it.zoom
+            offsetX = it.offsetX
+            offsetY = it.offsetY
+            invalidate()
+        }.also { it.start() }
+    }
+
+    fun zoomToFitContent() {
+        var l = Float.MAX_VALUE
+        var t = Float.MAX_VALUE
+        var r = -Float.MAX_VALUE
+        var b = -Float.MAX_VALUE
+        for (item in displayStrokes) {
+            val bb = item.bounds
+            if (bb.isEmpty) continue
+            if (bb.left < l) l = bb.left
+            if (bb.top < t) t = bb.top
+            if (bb.right > r) r = bb.right
+            if (bb.bottom > b) b = bb.bottom
+        }
+        for (item in displayShapes) {
+            val bb = item.bounds
+            if (bb.isEmpty) continue
+            if (bb.left < l) l = bb.left
+            if (bb.top < t) t = bb.top
+            if (bb.right > r) r = bb.right
+            if (bb.bottom > b) b = bb.bottom
+        }
+        if (l > r) {
+            l = 0f; t = 0f
+            r = com.vellum.notes.render.PageBackgroundRenderer.PAGE_W_MM
+            b = com.vellum.notes.render.PageBackgroundRenderer.PAGE_H_MM
+        }
+        if (width <= 0 || height <= 0) return
+        animateViewportTo(
+            com.vellum.notes.editor.ViewportAnimator.fitViewport(
+                l, t, r, b, width.toFloat(), height.toFloat(), capabilities.pxPerMm,
+            ),
+        )
+    }
+
     override fun onHoverEvent(event: MotionEvent): Boolean {
         if (::engine.isInitialized) {
             when (event.actionMasked) {
@@ -652,6 +737,36 @@ class InkCanvasView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        viewportAnim?.takeIf { it.isRunning }?.cancel()
+        if (insertSpaceArmed) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    insertSpaceAnchorY = screenToWorldY(event.getY(0))
+                    insertSpaceGapMm = 0f
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val anchor = insertSpaceAnchorY ?: return true
+                    insertSpaceGapMm =
+                        ((event.getY(0) - (anchor * scale + offsetY)) / scale).coerceAtLeast(0f)
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val anchor = insertSpaceAnchorY
+                    val gap = insertSpaceGapMm
+                    insertSpaceArmed = false
+                    if (anchor != null && gap >= 2f) onInsertSpace?.invoke(anchor, gap)
+                    return true
+                }
+                MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> {
+                    insertSpaceArmed = false
+                    return true
+                }
+            }
+            return true
+        }
         // Nebo-style double-tap with two fingers = undo. Detected on the raw
         // touch path (before palm rejection) so it works regardless of how the
         // engine classifies the two contacts. Quick taps never move enough to
@@ -1091,6 +1206,19 @@ class InkCanvasView @JvmOverloads constructor(
                             endT = 0L
                         }
                         val stroke = b.onUp(endX, endY, endT)
+                        val loop = if (stroke != null && tool == Tool.PEN) {
+                            val durationMs = if (endT > strokeStartNanos) {
+                                (endT - strokeStartNanos) / 1_000_000L
+                            } else -1L
+                            com.vellum.notes.editor.CircleSelect.analyze(b.livePoints, durationMs)
+                        } else null
+                        if (loop != null) {
+                            listener?.onSelectInRect(
+                                RectF(loop.minX, loop.minY, loop.maxX, loop.maxY),
+                            )
+                            invalidate()
+                            return@let
+                        }
                         if (stroke != null) {
                             // Commit to the display list immediately (before the model
                             // round-trip) so the stroke never vanishes between layers.
@@ -1146,6 +1274,7 @@ class InkCanvasView @JvmOverloads constructor(
                             )
                             builder.onDown(worldX, worldY)
                             strokeBuilder = builder
+                            strokeStartNanos = contact.contact.eventTimeNanos
                             writingPointerId = writingId
                         }
                     }
@@ -1178,6 +1307,7 @@ class InkCanvasView @JvmOverloads constructor(
                                 b.onDown(startX, startY)
                             }
                             strokeBuilder = b
+                            strokeStartNanos = contact.contact.eventTimeNanos
                             writingPointerId = writingId
                             builder = b
                         }
@@ -1760,6 +1890,7 @@ class InkCanvasView @JvmOverloads constructor(
             ),
             grainPaint = grainPaint,
             createdAtMs = stroke.createdAtMs,
+            baseAlpha = paint.alpha,
         )
     }
 
@@ -1851,6 +1982,30 @@ class InkCanvasView @JvmOverloads constructor(
         canvas.drawPath(item.path, item.paint)
     }
 
+    private fun drawCommittedStroke(canvas: Canvas, item: CachedStroke, alphaScale: Float) {
+        if (alphaScale >= 1f) {
+            drawCommittedStroke(canvas, item)
+            return
+        }
+        val paint = item.paint
+        val saved = paint.alpha
+        paint.alpha = (item.baseAlpha * alphaScale).toInt().coerceIn(0, item.baseAlpha)
+        val grain = if (item.pencil) item.grainPaint else null
+        val grainSaved = grain?.alpha ?: 0
+        grain?.alpha = (item.grainAlpha * alphaScale).toInt().coerceIn(0, item.grainAlpha)
+        drawCommittedStroke(canvas, item)
+        paint.alpha = saved
+        grain?.alpha = grainSaved
+    }
+
+    private fun replayAlpha(item: CachedStroke): Float {
+        val cutoff = replayCutoffMs ?: return 1f
+        if (item.createdAtMs <= 0L) return 1f
+        val age = cutoff - item.createdAtMs
+        if (age < 0) return 1f
+        return (age / 600f).coerceIn(0.25f, 1f)
+    }
+
     /**
      * Draws the in-progress stroke without per-frame allocations for the common
      * plain-polyline pens. The path and paints are scratch fields rewound/updated
@@ -1905,11 +2060,20 @@ class InkCanvasView @JvmOverloads constructor(
         for (item in displayStrokes) {
             if (!cull.isVisible(item.bounds, clipRect)) continue
             if (!com.vellum.notes.editor.StrokeReplay.visibleInReplay(item.createdAtMs, replayCutoffMs)) continue
-            drawCommittedStroke(canvas, item)
+            drawCommittedStroke(canvas, item, replayAlpha(item))
         }
         canvas.restore()
         zoomWindowBorderPaint.strokeWidth = 2f
         canvas.drawRect(win.left, win.top, win.right, win.bottom, zoomWindowBorderPaint)
+    }
+
+    private fun drawInsertSpacePreview(canvas: Canvas) {
+        val anchor = insertSpaceAnchorY ?: return
+        if (!insertSpaceArmed) return
+        val y0 = anchor * scale + offsetY
+        val y1 = y0 + insertSpaceGapMm * scale
+        canvas.drawRect(0f, y0, width.toFloat(), y1.coerceAtLeast(y0), insertSpaceBandPaint)
+        canvas.drawLine(0f, y0, width.toFloat(), y0, insertSpaceLinePaint)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -2029,7 +2193,7 @@ class InkCanvasView @JvmOverloads constructor(
                 cull.isVisible(item.bounds, worldClip) &&
                 StrokeReplay.visibleInReplay(item.createdAtMs, replayCutoffMs)
             ) {
-                drawCommittedStroke(canvas, item)
+                drawCommittedStroke(canvas, item, replayAlpha(item))
             }
         }
         for (item in displayShapes) {
@@ -2042,7 +2206,7 @@ class InkCanvasView @JvmOverloads constructor(
                 cull.isVisible(item.bounds, worldClip) &&
                 StrokeReplay.visibleInReplay(item.createdAtMs, replayCutoffMs)
             ) {
-                drawCommittedStroke(canvas, item)
+                drawCommittedStroke(canvas, item, replayAlpha(item))
             }
         }
 
@@ -2079,6 +2243,7 @@ class InkCanvasView @JvmOverloads constructor(
         }
         canvas.restore()
         drawZoomWindow(canvas)
+        drawInsertSpacePreview(canvas)
 
         // Screen-space selection overlays.
         selectionBoundsMm?.let { bounds ->
