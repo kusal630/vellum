@@ -28,7 +28,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 🔄 Sync | Device sync via your Syncthing folder: versioned snapshots (plain/encrypted) with manifests, explicit newest-wins import with safety copy — no accounts, no servers |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
 | 📖 Read mode | Read imported books full-screen (Original/Sepia/Night), freehand highlighter in 4 colors, tap-erase, every highlight saved per page + searchable review list that jumps back to the exact page |
-| 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |
+| 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, audio-linked ink replay, saved with the note |
 | 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, spring-animated Fit to page, toolbar auto-hide while writing, undo/redo (incl. two-finger double-tap), viewport-culled display list (off-screen ink skipped, zero-allocation draw path, surgical partial invalidation while writing), no auto-scroll (viewport moves only by pan/zoom/scroll bar), light & dark themes |
 | ✍️ Convert | Select ink → **Convert** to an editable text box (single undo step; on-device $1-style print recognition, A–Z/0–9, "?" marks low confidence) |
 | 🧪 Diagnostics | Input Labs screen for calibrating palm rejection to your hardware |

@@ -408,17 +408,53 @@ fun EditorScreen(
         chapters = packRepository.getChapters(pageId)
     }
     var playbackMs by remember { mutableStateOf(0L) }
+    val liveAnchorMs by SpeechController.recordingAnchorWallMs.collectAsState()
+    var persistedAnchorMs by remember(pageId) { mutableStateOf(0L) }
+    LaunchedEffect(pageId) {
+        persistedAnchorMs = packRepository.getRecordingAnchor(pageId)
+    }
+    LaunchedEffect(recordingPageId, pageId, liveAnchorMs) {
+        if (recordingPageId == pageId && liveAnchorMs > 0L) {
+            packRepository.setRecordingAnchor(pageId, liveAnchorMs)
+            persistedAnchorMs = liveAnchorMs
+        }
+    }
+    val replayAnchorMs =
+        if (recordingPageId == pageId && liveAnchorMs > 0L) liveAnchorMs else persistedAnchorMs
+    val transcriptMaxMs = transcript.maxOfOrNull { if (it.endMs > 0L) it.endMs else it.startMs } ?: 0L
     val inkReplayRange = remember(content.strokes) {
         com.vellum.notes.editor.StrokeReplay.replayRange(content.strokes)
     }
     var inkReplayCutoff by remember(pageId) { mutableStateOf<Long?>(null) }
     var inkReplaying by remember(pageId) { mutableStateOf(false) }
+    fun syncInkToPlayback(positionMs: Long) {
+        inkReplayCutoff = com.vellum.notes.editor.StrokeReplay.cutoffForPlayback(replayAnchorMs, positionMs)
+    }
     var zoomWindowOn by rememberSaveable(pageId) { mutableStateOf(false) }
     var insertSpaceArmed by rememberSaveable(pageId) { mutableStateOf(false) }
     var inkActive by remember(pageId) { mutableStateOf(false) }
     var canvasView by remember(pageId) { mutableStateOf<InkCanvasView?>(null) }
     LaunchedEffect(inkReplaying, pageId) {
         if (!inkReplaying) return@LaunchedEffect
+        if (replayAnchorMs > 0L && transcriptMaxMs > 0L) {
+            playbackMs = 0L
+            syncInkToPlayback(0L)
+            val stepMs = (transcriptMaxMs / 100).coerceAtLeast(50L)
+            while (inkReplaying) {
+                kotlinx.coroutines.delay(100)
+                val next = playbackMs + stepMs
+                if (next >= transcriptMaxMs) {
+                    playbackMs = transcriptMaxMs
+                    syncInkToPlayback(transcriptMaxMs)
+                    kotlinx.coroutines.delay(600)
+                    inkReplaying = false
+                    break
+                }
+                playbackMs = next
+                syncInkToPlayback(next)
+            }
+            return@LaunchedEffect
+        }
         val range = inkReplayRange ?: run { inkReplaying = false; return@LaunchedEffect }
         val stepMs = ((range.second - range.first) / 100).coerceAtLeast(1L)
         while (inkReplaying) {
@@ -574,6 +610,14 @@ fun EditorScreen(
     // ---- Wave-1 UI state: templates, text boxes, images ----
     var showTemplateDialog by remember { mutableStateOf(false) }
     var showTextDialog by remember { mutableStateOf(false) }
+    var showSpellingDialog by rememberSaveable(pageId) { mutableStateOf(false) }
+    val spellingDictionary = remember(uiContext) {
+        runCatching {
+            com.vellum.notes.editor.Spellcheck.loadAssetLines {
+                uiContext.assets.open("words_en.txt").bufferedReader().readText()
+            }
+        }.getOrDefault(emptySet())
+    }
     var editingTextId by remember { mutableStateOf<Long?>(null) }
 
     val currentSummary = pageList.firstOrNull { it.id == pageId }
@@ -640,6 +684,66 @@ fun EditorScreen(
             onRestoredCurrentPage = {
                 // The restored page is open: reload it into the canvas now.
                 if (hid == pageId) vm.refreshContent()
+            },
+        )
+    }
+
+    if (showSpellingDialog) {
+        val unknowns = remember(content.textObjects, spellingDictionary) {
+            val seen = LinkedHashSet<String>()
+            for (t in content.textObjects) {
+                seen += com.vellum.notes.editor.Spellcheck.unknownWords(t.text, spellingDictionary)
+            }
+            seen.toList().take(50)
+        }
+        AlertDialog(
+            onDismissRequest = { showSpellingDialog = false },
+            title = { Text("Spelling") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (spellingDictionary.isEmpty()) {
+                        Text(
+                            "Word list unavailable.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else if (unknowns.isEmpty()) {
+                        Text(
+                            "No misspellings in typed text.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else {
+                        unknowns.forEach { word ->
+                            Text(
+                                word,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            ) {
+                                com.vellum.notes.editor.Spellcheck.suggestions(word, spellingDictionary)
+                                    .forEach { suggestion ->
+                                        FilterChip(
+                                            selected = false,
+                                            onClick = {
+                                                for (t in content.textObjects) {
+                                                    if (word in t.text) {
+                                                        vm.updateText(t.copy(text = t.text.replace(word, suggestion)))
+                                                    }
+                                                }
+                                            },
+                                            label = { Text(suggestion) },
+                                        )
+                                    }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSpellingDialog = false }) { Text("Done") }
             },
         )
     }
@@ -1023,6 +1127,7 @@ fun EditorScreen(
                     onFitToPage = { canvasView?.zoomToFitContent() },
                     insertSpaceArmed = insertSpaceArmed,
                     onToggleInsertSpace = { insertSpaceArmed = !insertSpaceArmed },
+                    onOpenSpelling = { showSpellingDialog = true },
                     onInsertText = { showTextDialog = true },
                     onInsertImage = {
                         imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -1281,7 +1386,10 @@ fun EditorScreen(
                         chapters = chapters,
                         playbackMs = playbackMs,
                         autoBackupEnabled = autoBackup,
-                        onSeekPlayback = { playbackMs = it },
+                        onSeekPlayback = {
+                            playbackMs = it
+                            syncInkToPlayback(it)
+                        },
                         onGenerateChapters = {
                             scope.launch {
                                 val generated =
@@ -1290,7 +1398,10 @@ fun EditorScreen(
                                 packRepository.setChapters(pageId, generated)
                             }
                         },
-                        onSeekChapter = { chapter -> playbackMs = chapter.startMs },
+                        onSeekChapter = { chapter ->
+                            playbackMs = chapter.startMs
+                            syncInkToPlayback(chapter.startMs)
+                        },
                         onToggleAutoBackup = { enabled ->
                             scope.launch { packRepository.setAutoBackup(enabled) }
                         },
@@ -1311,6 +1422,12 @@ fun EditorScreen(
                         inkReplayCutoff = inkReplayCutoff,
                         inkReplaying = inkReplaying,
                         onReplayPlay = {
+                            if (replayAnchorMs > 0L && transcriptMaxMs > 0L) {
+                                playbackMs = 0L
+                                syncInkToPlayback(0L)
+                                inkReplaying = true
+                                return@ClassroomSidebar
+                            }
                             val range = inkReplayRange ?: return@ClassroomSidebar
                             inkReplayCutoff = range.first
                             inkReplaying = true
@@ -1322,6 +1439,13 @@ fun EditorScreen(
                         onReplaySeek = {
                             inkReplaying = false
                             inkReplayCutoff = it
+                        },
+                        replayAnchorMs = replayAnchorMs,
+                        transcriptMaxMs = transcriptMaxMs,
+                        playbackPositionMs = playbackMs,
+                        onSyncPlayback = { pos ->
+                            playbackMs = pos
+                            syncInkToPlayback(pos)
                         },
                     )
                 }
@@ -1434,6 +1558,10 @@ private fun ClassroomSidebar(
     onReplayPlay: () -> Unit = {},
     onReplayStop: () -> Unit = {},
     onReplaySeek: (Long) -> Unit = {},
+    replayAnchorMs: Long = 0L,
+    transcriptMaxMs: Long = 0L,
+    playbackPositionMs: Long = 0L,
+    onSyncPlayback: (Long) -> Unit = {},
 ) {
     var tab by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
@@ -1669,7 +1797,8 @@ private fun ClassroomSidebar(
                     }
                 }
                 4 -> {
-                    if (inkReplayRange == null) {
+                    val linked = replayAnchorMs > 0L && transcriptMaxMs > 0L
+                    if (inkReplayRange == null && !linked) {
                         Text(
                             "No timestamped ink yet. New strokes are recorded " +
                                 "with commit times — replay them here stroke by stroke.",
@@ -1677,18 +1806,38 @@ private fun ClassroomSidebar(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        val (replayMin, replayMax) = inkReplayRange
-                        val span = (replayMax - replayMin).coerceAtLeast(1L)
-                        val progress = ((inkReplayCutoff ?: replayMax) - replayMin).toFloat() / span.toFloat()
+                        val (sliderValue, sliderMax, hint) = if (linked) {
+                            Triple(
+                                playbackPositionMs.toFloat() / transcriptMaxMs.toFloat(),
+                                transcriptMaxMs,
+                                "Linked to the lecture clock: ink appears as it was written.",
+                            )
+                        } else {
+                            val (replayMin, replayMax) = inkReplayRange!!
+                            val span = (replayMax - replayMin).coerceAtLeast(1L)
+                            Triple(
+                                ((inkReplayCutoff ?: replayMax) - replayMin).toFloat() / span.toFloat(),
+                                span,
+                                "Watch this page redraw itself in commit order.",
+                            )
+                        }
                         Text(
-                            "Watch this page redraw itself in commit order.",
+                            hint,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(8.dp))
                         Slider(
-                            value = progress.coerceIn(0f, 1f),
-                            onValueChange = { onReplaySeek(replayMin + (it * span).toLong()) },
+                            value = sliderValue.coerceIn(0f, 1f),
+                            onValueChange = {
+                                if (linked) {
+                                    val pos = (it * sliderMax).toLong()
+                                    onSyncPlayback(pos)
+                                } else {
+                                    val (replayMin, _) = inkReplayRange!!
+                                    onReplaySeek(replayMin + (it * sliderMax).toLong())
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth().semantics {
                                 contentDescription = "Ink replay position"
                             },
@@ -2639,6 +2788,7 @@ private fun CanvasTopBar(
     onFitToPage: () -> Unit = {},
     insertSpaceArmed: Boolean = false,
     onToggleInsertSpace: () -> Unit = {},
+    onOpenSpelling: () -> Unit = {},
     onInsertText: () -> Unit = {},
     onInsertImage: () -> Unit = {},
     onPickTemplate: () -> Unit = {},
@@ -2715,6 +2865,7 @@ private fun CanvasTopBar(
             onFitToPage = onFitToPage,
             insertSpaceArmed = insertSpaceArmed,
             onToggleInsertSpace = onToggleInsertSpace,
+            onOpenSpelling = onOpenSpelling,
             onAutoEraseToggle = onAutoEraseToggle,
             onInsertText = onInsertText,
             onInsertImage = onInsertImage,
@@ -2785,6 +2936,7 @@ private fun FixedToolbarContent(
     onFitToPage: () -> Unit = {},
     insertSpaceArmed: Boolean = false,
     onToggleInsertSpace: () -> Unit = {},
+    onOpenSpelling: () -> Unit = {},
     classroomUnlocked: Boolean = false,
     pdfUnlocked: Boolean = false,
     gestureUnlocked: Boolean = false,
@@ -2956,6 +3108,10 @@ private fun FixedToolbarContent(
                             DropdownMenuItem(
                                 text = { Text(if (insertSpaceArmed) "✓ Insert space" else "Insert space") },
                                 onClick = { overflowOpen = false; onToggleInsertSpace() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Check spelling") },
+                                onClick = { overflowOpen = false; onOpenSpelling() },
                             )
                         }
                     }

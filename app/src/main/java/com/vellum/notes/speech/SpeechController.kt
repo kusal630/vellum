@@ -34,6 +34,10 @@ object SpeechController {
     private val _recordingPageId = MutableStateFlow<Long?>(null)
     val recordingPageId: StateFlow<Long?> = _recordingPageId.asStateFlow()
 
+    /** Wall-clock ms when the current recording started; kept after stop for ink replay. */
+    private val _recordingAnchorWallMs = MutableStateFlow(0L)
+    val recordingAnchorWallMs: StateFlow<Long> = _recordingAnchorWallMs.asStateFlow()
+
     private val nextSegmentId = AtomicLong(0)
 
     /** Starts a fresh recording session for [pageId] (replaces any previous transcript). */
@@ -41,6 +45,7 @@ object SpeechController {
         _segments.value = emptyList()
         _partial.value = ""
         _recordingPageId.value = pageId
+        _recordingAnchorWallMs.value = System.currentTimeMillis()
         _isRecording.value = true
     }
 

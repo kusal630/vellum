@@ -44,6 +44,13 @@ class InkReflowTest {
     }
 
     @Test
+    fun shiftPastPageBottom_preservedForInfiniteScroll() {
+        val out = InkReflow.shiftBelow(content(), anchorY = 40f, dy = 300f)
+        val maxY = out.strokes.flatMap { it.pointsPacked.toList() }.maxOrNull() ?: 0f
+        assertTrue("overflow must survive past 297mm page, got $maxY", maxY > 297f)
+    }
+
+    @Test
     fun command_invertsExactly() {
         val c = content()
         val cmd = ReflowContentCommand(40f, 20f)

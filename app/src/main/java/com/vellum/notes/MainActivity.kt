@@ -101,17 +101,40 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             VellumTheme {
-                NotesAppRoot()
+                NotesAppRoot(
+                    launchCreateNote = intent?.action == android.content.Intent.ACTION_CREATE_NOTE,
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == android.content.Intent.ACTION_CREATE_NOTE) {
+            setIntent(intent)
+            recreate()
         }
     }
 }
 
 @Composable
-fun NotesAppRoot() {
+fun NotesAppRoot(launchCreateNote: Boolean = false) {
     val navController = rememberNavController()
     val container = (androidx.compose.ui.platform.LocalContext.current.applicationContext as VellumApp).container
+    var createNoteConsumed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(launchCreateNote) {
+        if (launchCreateNote && !createNoteConsumed) {
+            createNoteConsumed = true
+            runCatching {
+                val id = container.notesRepository.createNotebook(
+                    "Quick Note",
+                    com.vellum.notes.model.NoteType.NORMAL,
+                )
+                navController.navigate(Routes.editor(id))
+            }
+        }
+    }
     NavHost(navController = navController, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
             HomeScreen(

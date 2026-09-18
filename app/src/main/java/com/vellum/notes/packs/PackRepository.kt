@@ -58,6 +58,7 @@ private val PDF_KEY = booleanPreferencesKey("pdfPack")
 private val GESTURE_KEY = booleanPreferencesKey("gesturePack")
 private val CLASSROOM_AUTO_BACKUP_KEY = booleanPreferencesKey("classroom_auto_backup")
 private val CHAPTERS_KEY = stringPreferencesKey("classroom_chapters_json")
+private val RECORD_ANCHORS_KEY = stringPreferencesKey("classroom_record_anchors_json")
 private val BOOKMARKS_KEY = stringPreferencesKey("gesture_bookmarks_json")
 private val GESTURES_KEY = stringPreferencesKey("gesture_mapping_json")
 
@@ -120,6 +121,23 @@ class PackRepository(private val dataStore: DataStore<Preferences>) {
         val map = readChapters().toMutableMap()
         map[pageId.toString()] = chapters
         dataStore.edit { it[CHAPTERS_KEY] = packJson.encodeToString(map) }
+    }
+
+    /** Wall-clock ms a classroom recording started on [pageId]; 0 when unknown. */
+    suspend fun getRecordingAnchor(pageId: Long): Long =
+        runCatching {
+            val raw = dataStore.data.first()[RECORD_ANCHORS_KEY] ?: return 0L
+            packJson.decodeFromString<Map<String, Long>>(raw)[pageId.toString()] ?: 0L
+        }.getOrDefault(0L)
+
+    suspend fun setRecordingAnchor(pageId: Long, wallMs: Long) {
+        val map = runCatching {
+            val raw = dataStore.data.first()[RECORD_ANCHORS_KEY]
+                ?: return@runCatching mutableMapOf<String, Long>()
+            packJson.decodeFromString<Map<String, Long>>(raw).toMutableMap()
+        }.getOrDefault(mutableMapOf())
+        map[pageId.toString()] = wallMs
+        dataStore.edit { it[RECORD_ANCHORS_KEY] = packJson.encodeToString(map) }
     }
 
     // --- Gesture/Bookmark Pack data ---

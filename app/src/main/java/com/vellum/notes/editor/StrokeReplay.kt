@@ -21,4 +21,10 @@ object StrokeReplay {
         if (min == Long.MAX_VALUE) return null
         return min to max
     }
+
+    /** Ink cutoff for a transcript position: strokes committed up to this wall time show. */
+    fun cutoffForPlayback(anchorWallMs: Long, playbackElapsedMs: Long): Long? {
+        if (anchorWallMs <= 0L || playbackElapsedMs < 0L) return null
+        return anchorWallMs + playbackElapsedMs
+    }
 }

@@ -51,6 +51,10 @@
 - [x] Circle-to-select pen gesture (fast closed loops select instead of inking)
 - [x] Spring viewport animator + Fit to page + toolbar auto-hide while writing
 - [x] Replay fade-in (fresh strokes ease from 25% alpha over 600ms)
+- [x] Audio-linked replay (recording anchor + transcript clock drives ink cutoff)
+- [x] Offline spellcheck for typed text (bundled wordlist, tap-to-apply suggestions)
+- [x] System Notes role (CREATE_NOTE: tail-button + lock-screen quick note)
+- [x] Zoom focus clamped to content; haptic snaps on circle-select + insert-space
 - [x] FAR/FRR-gated replay battery + left-hand/edge/hover/pinch fixtures
 - [x] Auto-erase (write/erase detection) toggle
 - [x] Page template picker per page

@@ -109,3 +109,19 @@ documentation (developer.android.com) — extracted verbatim points, condensed._
   feasible ($1 recognition, extractive summary).
 - Two-finger pan with a palm down was broken (fingers latched as writers);
   fixed by restricting lock handoff to hardware writers.
+
+## 8. 2026-09-18 wave 3: no pending moats
+
+- Audio-linked ink replay: recording-start wall anchor persisted per page;
+  transcript seeks and Replay play drive the same ink cutoff clock.
+- Offline spellcheck ships for typed text (73k-word bundled list, SCOWL
+  attribution in third-party-notices.md); ink-word correction stays out
+  (rewriting strokes needs ML; doctrine).
+- System Notes role (CREATE_NOTE + showWhenLocked): tail-button and
+  lock-screen quick note, per Android stylus guidance.
+- Platform Motion Prediction Jetpack + Material expressive MotionScheme
+  evaluated: alpha-only APIs on the pinned BOM; hand-rolled predictor and
+  spring animator stay until they go stable.
+- 2026 UX guidance applied: distinct haptics per gesture (reject vs snap),
+  compound-gesture discovery via overflow labels, four-level dark surfaces
+  already in theme.

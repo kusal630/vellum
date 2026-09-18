@@ -38,4 +38,17 @@ class StrokeReplayTest {
         assertNull(StrokeReplay.replayRange(listOf(stroke(1, 0L))))
         assertEquals(1000L to 3000L, StrokeReplay.replayRange(listOf(stroke(1, 0L), stroke(2, 3000L), stroke(3, 1000L))))
     }
+
+    @Test
+    fun cutoffForPlayback_addsElapsedToAnchor() {
+        assertEquals(65000L, StrokeReplay.cutoffForPlayback(60000L, 5000L))
+        assertEquals(60000L, StrokeReplay.cutoffForPlayback(60000L, 0L))
+    }
+
+    @Test
+    fun cutoffForPlayback_missingAnchorOrNegative_returnsNull() {
+        assertNull(StrokeReplay.cutoffForPlayback(0L, 5000L))
+        assertNull(StrokeReplay.cutoffForPlayback(-1L, 5000L))
+        assertNull(StrokeReplay.cutoffForPlayback(60000L, -1L))
+    }
 }

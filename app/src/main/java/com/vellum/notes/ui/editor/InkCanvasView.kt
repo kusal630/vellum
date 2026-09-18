@@ -757,7 +757,10 @@ class InkCanvasView @JvmOverloads constructor(
                     val anchor = insertSpaceAnchorY
                     val gap = insertSpaceGapMm
                     insertSpaceArmed = false
-                    if (anchor != null && gap >= 2f) onInsertSpace?.invoke(anchor, gap)
+                    if (anchor != null && gap >= 2f) {
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        onInsertSpace?.invoke(anchor, gap)
+                    }
                     return true
                 }
                 MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> {
@@ -1213,6 +1216,7 @@ class InkCanvasView @JvmOverloads constructor(
                             com.vellum.notes.editor.CircleSelect.analyze(b.livePoints, durationMs)
                         } else null
                         if (loop != null) {
+                            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             listener?.onSelectInRect(
                                 RectF(loop.minX, loop.minY, loop.maxX, loop.maxY),
                             )
@@ -2046,15 +2050,23 @@ class InkCanvasView @JvmOverloads constructor(
                 .takeIf { it.isFinite() } ?: 148f
             com.vellum.notes.model.Point(cx, cy).also { zoomFocusWorld = it }
         }
+        zoomFocusWorld = focus.copy(
+            x = focus.x.coerceIn(
+                -50f,
+                com.vellum.notes.render.PageBackgroundRenderer.PAGE_W_MM + 50f,
+            ),
+            y = focus.y.coerceIn(-50f, (contentMaxYMm + 80f).coerceAtLeast(500f)),
+        )
+        val clamped = zoomFocusWorld!!
         val zoom = com.vellum.notes.editor.ZoomWindow.DEFAULT_ZOOM
-        val clip = com.vellum.notes.editor.ZoomWindow.worldClipFor(focus, win, scale)
+        val clip = com.vellum.notes.editor.ZoomWindow.worldClipFor(clamped, win, scale)
         val clipRect = RectF(clip.left, clip.top, clip.right, clip.bottom)
         canvas.save()
         canvas.clipRect(win.left, win.top, win.right, win.bottom)
         canvas.drawRect(win.left, win.top, win.right, win.bottom, zoomWindowBgPaint)
         canvas.translate(win.centerX, win.centerY)
         canvas.scale(zoom, zoom)
-        canvas.translate(-(offsetX + scale * focus.x), -(offsetY + scale * focus.y))
+        canvas.translate(-(offsetX + scale * clamped.x), -(offsetY + scale * clamped.y))
         com.vellum.notes.render.PageBackgroundRenderer.drawBackground(canvas, background, 1f, clipRect)
         val cull = com.vellum.notes.render.StrokeCull
         for (item in displayStrokes) {
