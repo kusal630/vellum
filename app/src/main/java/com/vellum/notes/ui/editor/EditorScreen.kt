@@ -1174,6 +1174,27 @@ fun EditorScreen(
                     onLockedPack = { unlockPack = it },
                 )
                 }
+                val pickersVisibleToolbar =
+                    tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.SHAPES
+                if (pickersVisibleToolbar) {
+                    PenPickersPanel(
+                        penStyle = penStyle,
+                        smoothing = settings.smoothing,
+                        onColor = { color ->
+                            vm.setPenStyle(penStyle.copy(colorArgb = color))
+                        },
+                        onWidth = { w ->
+                            vm.setPenStyle(penStyle.copy(widthMm = w))
+                        },
+                        onSmoothingChange = { mode ->
+                            scope.launch {
+                                app.container.settingsRepository.updateSettings { this.smoothing = mode }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Canvas fills the whole screen so you can write edge to edge; the page
                 // rail is a hideable overlay toggled from the top bar. Keying by pageId
@@ -1232,7 +1253,7 @@ fun EditorScreen(
                                 view.debugOverlayEnabled = settings.debugOverlayEnabled
                                 // Palm rest zone + scroll bar.
                                 view.palmZone = settings.palmZone
-                                view.scrollBarVisible = true
+                                view.scrollBarVisible = !inkActive
                                 view.onPalmZoneChanged = { zone ->
                                     scope.launch {
                                         app.container.settingsRepository.updateSettings { palmZone = zone }
@@ -1267,39 +1288,7 @@ fun EditorScreen(
                             }
                         }
                     }
-                    // P1-4: ColorRail overlay removed — pickers live in the single bottom panel.
-                    // P1-4: single bottom pickers panel (colors + widths + smoothing).
-                    // Composed FIRST so the palm overlays below draw on top of it.
-                    val pickersVisible =
-                        tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.SHAPES
-                    if (pickersVisible) {
-                        PenPickersPanel(
-                            penStyle = penStyle,
-                            smoothing = settings.smoothing,
-                            onColor = { color ->
-                                vm.setPenStyle(penStyle.copy(colorArgb = color))
-                            },
-                            onWidth = { w ->
-                                vm.setPenStyle(penStyle.copy(widthMm = w))
-                            },
-                            onSmoothingChange = { mode ->
-                                scope.launch {
-                                    app.container.settingsRepository.updateSettings { this.smoothing = mode }
-                                }
-                            },
-                            modifier = Modifier.align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
-                    // BUG 2 + BUG 3 fix: palm overlays are composed LAST (topmost z) and
-                    // lifted above the bottom pickers panel when it is visible. Previously
-                    // they sat at bottom=96/152dp UNDER the full-width panel, so on a fresh
-                    // install (default PEN tool) the handle and the once-per-install
-                    // coachmark were covered and never displayed.
-                    // Panel height estimate (~340dp: fixed 48dp rows + labels + paddings),
-                    // so 352dp clears it with an 8dp gap; 96dp when the panel is hidden.
-                    val palmOverlayBottom = if (pickersVisible) 352.dp else 96.dp
+                    val palmOverlayBottom = 96.dp
                     Column(
                         modifier = Modifier.align(Alignment.BottomEnd)
                             .padding(end = 16.dp, bottom = palmOverlayBottom),
@@ -3347,27 +3336,6 @@ private fun ContextPanelRow(
     canConvert: Boolean = false,
     onConvertSelection: () -> Unit = {},
 ) {
-    if (true) {
-        // Context panel second row placeholder replaced below.
-    }
-    // Context panel: settings for the active tool, or selection actions.
-    // (Existing second row preserved; pen colors/widths/smoothing live in the bottom panel.)
-    if (showPicker || tool == Tool.SELECT) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            shape = RoundedCornerShape(20.dp),
-            tonalElevation = 3.dp,
-            shadowElevation = 2.dp,
-        ) {
-            DummyContextPanelContent()
-        }
-    }
-}
-
-@Composable
-private fun DummyContextPanelContent() {
-    // Replaced by full context panel below via overload.
-    Box(Modifier.height(1.dp))
 }
 
 @Composable

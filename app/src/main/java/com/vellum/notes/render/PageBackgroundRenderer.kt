@@ -42,47 +42,22 @@ object PageBackgroundRenderer {
     fun drawBackground(canvas: Canvas, bg: PageBackground, pxPerMm: Float, worldClip: RectF) {
         val bgColor = (bg.colorArgb and 0xFFFFFFFF.toLong()).toInt()
 
-        // 1) Paper fills the whole viewport: no desk void around the page, at any
-        // zoom. The export page bounds below stay the canonical page size.
+        // 1) Paper fills the whole viewport: pure color, no shadows, no sheen, no
+        // visual noise outside the page bounds. World-class note apps (GoodNotes,
+        // Notability, Concepts) keep the canvas clean — the paper IS the background.
         sheetPaint.style = Paint.Style.FILL
         sheetPaint.color = bgColor
         canvas.drawRect(worldClip, sheetPaint)
 
-        // 2) Page sheet edge: soft layered shadow + hairline at the canonical
-        // page rect, so the export bounds stay visible while writing anywhere.
-        val shadowLayers = floatArrayOf(0.020f, 0.012f, 0.006f)
-        val shadowAlphas = intArrayOf(26, 34, 44)
-        shadowPaint.style = Paint.Style.FILL
-        for (i in shadowLayers.indices) {
-            val grow = shadowLayers[i] * PAGE_W_MM
-            shadowPaint.color = Color.argb(shadowAlphas[i], 0, 0, 0)
-            sheetRect.set(-grow, -grow * 1.2f, PAGE_W_MM + grow, PAGE_H_MM + grow * 1.2f)
-            canvas.drawRoundRect(sheetRect, PAGE_CORNER_MM + grow, PAGE_CORNER_MM + grow, shadowPaint)
-        }
-
+        // 2) Subtle page boundary: a single thin hairline so the user can see the
+        // page edge when zoomed out, but no shadow or sheen that creates visual
+        // clutter. The line is clipped to the viewport so it never draws outside.
         sheetPaint.style = Paint.Style.FILL
         sheetPaint.color = bgColor
         sheetRect.set(0f, 0f, PAGE_W_MM, PAGE_H_MM)
         canvas.drawRoundRect(sheetRect, PAGE_CORNER_MM, PAGE_CORNER_MM, sheetPaint)
+        // Thin edge line — just enough to delineate the page, no shadow.
         canvas.drawRoundRect(sheetRect, PAGE_CORNER_MM, PAGE_CORNER_MM, sheetEdgePaint)
-
-        // 3) Top sheen: a whisper of light along the page's top edge (paper realism).
-        if (sheenShader == null || sheenPaperColor != bgColor) {
-            sheenPaperColor = bgColor
-            sheenShader = LinearGradient(
-                0f, 0f, 0f, 40f,
-                Color.argb(18, 255, 255, 255),
-                Color.argb(0, 255, 255, 255),
-                Shader.TileMode.CLAMP,
-            )
-            sheenPaint.shader = sheenShader
-        }
-        canvas.save()
-        clipPath.rewind()
-        clipPath.addRoundRect(sheetRect, PAGE_CORNER_MM, PAGE_CORNER_MM, Path.Direction.CW)
-        canvas.clipPath(clipPath)
-        canvas.drawRect(0f, 0f, PAGE_W_MM, 40f, sheenPaint)
-        canvas.restore()
 
         linePaint.color = bg.lineColorArgb.toInt()
 

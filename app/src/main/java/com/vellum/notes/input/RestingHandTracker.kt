@@ -471,7 +471,7 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                                 capabilities.dimFromPx(st.totalDistPx) >= settings.movementPromoteThresholdMm &&
                                     activeWritingPointerId == null &&
                                     !inDriftingCluster(id) &&
-                                    effectivePromoteVelocity() <= settings.minPromoteVelocityMmPerSec * 1.1f -> {
+                                    effectivePromoteVelocity() <= settings.minPromoteVelocityMmPerSec * 1.2f -> {
                                     // Unique mover check using slow movement (distance only)
                                     // — if more than one contact moved this frame, it's a
                                     // gesture, not a writer.
